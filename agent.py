@@ -58,12 +58,17 @@ tools = [generate_session_id, breathing_exercise, schedule_session]
 # إعداد النموذج اللغوي (LLM)
 # ==============================
 
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+if not OPENROUTER_API_KEY:
+    raise RuntimeError("OPENROUTER_API_KEY is not set")
+
 llm = ChatOpenAI(
     model="deepseek/deepseek-chat",
     base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
+    api_key=OPENROUTER_API_KEY,
     temperature=0.3,
 )
+
 
 # ==============================
 # SYSTEM PROMPT مُحسّن

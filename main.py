@@ -5,6 +5,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 import uuid
 from dotenv import load_dotenv
+from pathlib import Path
 
 from agent import ConversationController
 
@@ -12,11 +13,20 @@ load_dotenv()
 
 app = FastAPI(title="Mental Health Chatbot")
 
-# إعداد الملفات الثابتة والقوالب
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
 
-# تخزين الجلسات (في الإنتاج استخدم قاعدة بيانات)
+
+
+BASE_DIR = Path(__file__).resolve().parent
+
+app.mount(
+    "/static",
+    StaticFiles(directory=BASE_DIR / "static"),
+    name="static"
+)
+
+templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+
 sessions: dict[str, ConversationController] = {}
 
 class ChatRequest(BaseModel):
@@ -27,12 +37,18 @@ class ChatResponse(BaseModel):
 
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request, response: Response):
-    # التحقق من وجود معرف جلسة في الكوكيز
+
     session_id = request.cookies.get("session_id")
     if not session_id:
         session_id = str(uuid.uuid4())
-        response.set_cookie(key="session_id", value=session_id, httponly=True)
-    # إنشاء وحدة تحكم للجلسة إذا لم تكن موجودة
+        response.set_cookie(
+            key="session_id",
+            value=session_id,
+            httponly=True,
+            secure=True,
+            samesite="lax"
+        )
+
     if session_id not in sessions:
         sessions[session_id] = ConversationController()
     return templates.TemplateResponse("index.html", {"request": request})
@@ -42,7 +58,14 @@ async def chat_endpoint(req: ChatRequest, request: Request, response: Response):
     session_id = request.cookies.get("session_id")
     if not session_id:
         session_id = str(uuid.uuid4())
-        response.set_cookie(key="session_id", value=session_id, httponly=True)
+        response.set_cookie(
+            key="session_id",
+            value=session_id,
+            httponly=True,
+            secure=True,
+            samesite="lax"
+        )
+
         sessions[session_id] = ConversationController()
     else:
         if session_id not in sessions:
