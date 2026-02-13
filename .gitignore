@@ -1,0 +1,40 @@
+# =========================
+# Python
+# =========================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.db
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# dotenv
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Build
+dist/
+build/
+
+# FastAPI
+*.sqlite3
+
+# Node (لو أضفت frontend لاحقاً)
+node_modules/
+
+# uv
+uv.lock
