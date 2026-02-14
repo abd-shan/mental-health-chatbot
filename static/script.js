@@ -1,6 +1,45 @@
 const messagesContainer = document.getElementById('messages');
 const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
+const featureBtn = document.getElementById('feature-btn');
+const featurePanel = document.getElementById('feature-panel');
+
+
+if (featureBtn) {
+    featureBtn.addEventListener('click', () => {
+        featurePanel.classList.toggle('show');
+    });
+
+
+    document.addEventListener('click', (e) => {
+        if (!featurePanel.contains(e.target) && !featureBtn.contains(e.target)) {
+            featurePanel.classList.remove('show');
+        }
+    });
+}
+
+
+function formatMessageText(text) {
+
+    let safeText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+
+    safeText = safeText.replace(/^#+\s+/gm, ''); //  remove '#'
+
+    //remove '*' '-'
+    safeText = safeText.replace(/^[-*]\s+/gm, '');
+
+    safeText = safeText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+
+    safeText = safeText.replace(/\*(?!\s)(.*?)\*(?!\s)/g, '<em>$1</em>');
+
+
+    const paragraphs = safeText.split('\n').filter(line => line.trim() !== '');
+    if (paragraphs.length === 0) return '<br>';
+
+    return paragraphs.map(p => `<p>${p}</p>`).join('');
+}
 
 
 function addMessage(text, sender) {
@@ -10,11 +49,15 @@ function addMessage(text, sender) {
 
     const bubble = document.createElement('div');
     bubble.classList.add('bubble');
-    bubble.innerText = text;
+
+    if (sender === 'bot') {
+        bubble.innerHTML = formatMessageText(text);
+    } else {
+        bubble.innerText = text;
+    }
 
     messageDiv.appendChild(bubble);
     messagesContainer.appendChild(messageDiv);
-
 
     messagesContainer.scrollTo({
         top: messagesContainer.scrollHeight,
@@ -45,13 +88,10 @@ async function sendMessage() {
     const text = userInput.value.trim();
     if (text === '') return;
 
-
     addMessage(text, 'user');
     userInput.value = '';
 
-
     sendBtn.disabled = true;
-
 
     const typingIndicator = createTypingIndicator();
     messagesContainer.appendChild(typingIndicator);
@@ -69,11 +109,9 @@ async function sendMessage() {
 
         const data = await response.json();
 
-
         document.getElementById('typing')?.remove();
 
         if (response.ok) {
-
             setTimeout(() => {
                 addMessage(data.response, 'bot');
             }, 300);
@@ -97,6 +135,5 @@ userInput.addEventListener('keypress', (e) => {
         sendMessage();
     }
 });
-
 
 userInput.focus();

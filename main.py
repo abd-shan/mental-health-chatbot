@@ -45,7 +45,7 @@ app = FastAPI(
 
 # دعم Reverse Proxy (Railway)
 
-# CORS (يمكن تقييده لاحقاً)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

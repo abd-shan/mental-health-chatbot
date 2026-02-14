@@ -12,15 +12,25 @@ from langchain_core.tools import tool
 from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 
-# تحميل متغيرات البيئة
+# ==============================
+# Environment
+# ==============================
+
 load_dotenv()
 
-# إعداد التسجيل
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+if not OPENROUTER_API_KEY:
+    raise RuntimeError("OPENROUTER_API_KEY is not set")
+
+# ==============================
+# Logging
+# ==============================
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================
-# الأدوات (Tools)
+# Tools
 # ==============================
 
 @tool
@@ -28,6 +38,7 @@ def generate_session_id() -> str:
     """Generate secure session ID."""
     chars = string.ascii_letters + string.digits
     return "".join(random.choice(chars) for _ in range(24))
+
 
 @tool
 def breathing_exercise() -> str:
@@ -40,6 +51,7 @@ def breathing_exercise() -> str:
         "كرر ذلك 4 مرات."
     )
 
+
 @tool
 def schedule_session(name: str, days_from_now: int = 1) -> str:
     """Simulate scheduling a therapy session."""
@@ -51,16 +63,11 @@ def schedule_session(name: str, days_from_now: int = 1) -> str:
     }
     return json.dumps(booking, ensure_ascii=False)
 
-# قائمة الأدوات الأساسية
 tools = [generate_session_id, breathing_exercise, schedule_session]
 
 # ==============================
-# إعداد النموذج اللغوي (LLM)
+# LLM
 # ==============================
-
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-if not OPENROUTER_API_KEY:
-    raise RuntimeError("OPENROUTER_API_KEY is not set")
 
 llm = ChatOpenAI(
     model="deepseek/deepseek-chat",
@@ -69,24 +76,34 @@ llm = ChatOpenAI(
     temperature=0.3,
 )
 
-
 # ==============================
-# SYSTEM PROMPT مُحسّن
+# System Prompt
 # ==============================
 
 SYSTEM_PROMPT = """
-أنت مساعد متخصص في المحادثات النفسية والدعم العاطفي.
-المبادئ التوجيهية:
-- كن فضولياً واطرح أسئلة استكشافية قبل اللجوء إلى الأدوات.
-- لا تفترض القلق أو التوتر مباشرة؛ افهم السياق أولاً.
-- إذا كان السؤال تعليمياً (مثلاً "ما هو القلق؟")، قدم شرحاً وافياً دون استخدام أدوات.
-- الأدوات (مثل تمارين التنفس أو حجز الجلسات) هي وسيلة ثانوية؛ المحادثة هي الأساس.
-- حافظ على نبرة هادئة ومتعاطفة.
+أنت مساعد متخصص في الدعم النفسي تم تطويرك ضمن منصة "عون".
+
+الهوية:
+- التطبيق من تطوير فريق منصة عون.
+- المطور التقني: المهندس عبدالقادر الشنبور.
+- تقدم دعماً نفسياً متوافقاً مع القيم الإسلامية والأخلاق السليمة.
+
+المبادئ:
+- عزز الطمأنينة، الصبر، ضبط النفس، والعفة.
+- لا تشجع أو تبرر أي سلوك محرم أو ضار مثل الإباحية، الزنا، الخمور، أو الإدمان.
+- إذا طُلب أمر مخالف، وجّه بلطف نحو بديل صحي ونقي.
+- لا تكن واعظاً قاسياً، بل موجهاً رحيماً.
 - لا تقدم تشخيصات طبية.
+- استخدم لغة هادئة متزنة.
+
+آلية التفاعل:
+- افهم السياق أولاً.
+- اسأل أسئلة استكشافية.
+- يمكن إدماج بعد روحي عند الحاجة بشكل طبيعي وغير مباشر.
 """
 
 # ==============================
-# إنشاء agent_executor باستخدام create_agent
+# Agent
 # ==============================
 
 agent_executor = create_agent(
@@ -96,91 +113,89 @@ agent_executor = create_agent(
 )
 
 # ==============================
-# دالة كشف النية (Intent Router)
+# Content Filter
+# ==============================
+
+def contains_prohibited_content(text: str) -> bool:
+    text = text.lower()
+    prohibited_keywords = [
+        "اباحية", "اباحي", "porn",
+        "زنا", "علاقة محرمة",
+        "خمور", "كحول", "سكر",
+        "عادة سرية", "استمناء"
+    ]
+    return any(word in text for word in prohibited_keywords)
+
+# ==============================
+# Intent Detection
 # ==============================
 
 def detect_intent(text: str) -> str:
-    """تحديد نية المستخدم بناءً على النص."""
     text = text.lower()
-    if any(word in text for word in ["اشرح", "ما هو", "ماهي", "تعريف", "شرح"]):
+    if any(word in text for word in ["اشرح", "ما هو", "تعريف"]):
         return "education"
-    elif any(word in text for word in ["دعم", "متوتر", "قلق", "حزين", "تعاسة", "ضيق"]):
+    elif any(word in text for word in ["متوتر", "قلق", "حزين", "ضيق"]):
         return "support"
-    elif any(word in text for word in ["احجز", "جلسة", "موعد", "حجز"]):
+    elif any(word in text for word in ["احجز", "جلسة", "موعد"]):
         return "booking"
     else:
         return "casual"
 
 # ==============================
-# كلاس ConversationController
+# Conversation Controller
 # ==============================
 
 class ConversationController:
-    """
-    يدير المحادثة بالكامل: الحالة، الذاكرة، توجيه الطلبات إلى LLM أو agent.
-    """
 
     def __init__(self):
         self.messages: List[BaseMessage] = []
-        self.state: str = "neutral"  # possible: neutral, support_mode, education_mode, booking_mode
-        # إضافة رسالة النظام في بداية المحادثة
         self.messages.append(SystemMessage(content=SYSTEM_PROMPT))
-        logger.info("ConversationController initialized with state: %s", self.state)
+        self.state = "neutral"
 
-    def _update_state(self, intent: str):
-        """تحديث الحالة بناءً على النية."""
-        if intent == "education":
-            self.state = "education_mode"
-        elif intent == "support":
-            self.state = "support_mode"
-        elif intent == "booking":
-            self.state = "booking_mode"
-        else:  # casual
-            self.state = "neutral"
-        logger.info("State updated to: %s", self.state)
-
-    def _call_llm_directly(self, messages: List[BaseMessage]) -> str:
-        """استدعاء النموذج مباشرة بدون agent."""
-        response = llm.invoke(messages)
-        return response.content
+    def _call_llm(self, messages: List[BaseMessage]) -> str:
+        try:
+            response = llm.invoke(messages)
+            return response.content
+        except Exception as e:
+            logger.exception("LLM call failed")
+            return "حدث خطأ مؤقت في المعالجة، حاول مرة أخرى."
 
     def chat(self, user_input: str) -> str:
-        # إضافة رسالة المستخدم
+
+        # فلترة المحتوى المحرم
+        if contains_prohibited_content(user_input):
+            return (
+                "أفهم أن هناك أموراً قد تشغل بالك، لكن من المهم أن نحافظ على نقاء النفس وسلامتها.\n\n"
+                "إذا كنت تواجه صراعاً داخلياً، يمكننا الحديث عن طرق صحية ونقية "
+                "للتعامل مع الضغوط والرغبات.\n\n"
+                "ما الذي تشعر به تحديداً؟"
+            )
+
         self.messages.append(HumanMessage(content=user_input))
 
-        # تحديد النية
         intent = detect_intent(user_input)
-        logger.info("Detected intent: %s", intent)
 
-        # تحديث الحالة
-        self._update_state(intent)
-
-        # تحديد مسار المعالجة
         if intent in ["education", "casual"]:
-            # استخدام LLM مباشرة
-            ai_content = self._call_llm_directly(self.messages)
-            logger.info("Using direct LLM for intent: %s", intent)
-        else:  # support or booking
-            # استخدام agent مع إضافة تعليمات الحالة مؤقتاً
-            state_instruction = f"الحالة الحالية للمحادثة: {self.state}. استخدم الأدوات المناسبة فقط."
-            temp_messages = self.messages + [SystemMessage(content=state_instruction)]
-            result = agent_executor.invoke({"messages": temp_messages})
-            ai_content = result["messages"][-1].content
-            logger.info("Using agent for intent: %s with state: %s", intent, self.state)
+            ai_content = self._call_llm(self.messages)
 
-        # إضافة رد الوكيل إلى السجل
+        else:
+            state_instruction = SystemMessage(
+                content=f"الحالة الحالية: {intent}. استخدم الأدوات فقط إذا لزم الأمر."
+            )
+            temp_messages = self.messages + [state_instruction]
+            try:
+                result = agent_executor.invoke({"messages": temp_messages})
+                ai_content = result["messages"][-1].content
+            except Exception:
+                logger.exception("Agent failed")
+                ai_content = "حدث خطأ مؤقت، حاول مرة أخرى."
+
         self.messages.append(AIMessage(content=ai_content))
 
-        # تطبيق النافذة المنزلقة (آخر 12 رسالة مع بقاء رسالة النظام)
-        if len(self.messages) > 13:  # system + 12 others
-            self.messages = [self.messages[0]] + self.messages[-12:]
-        else:
-            self.messages = self.messages[:1] + self.messages[-12:]  # في حالة عدد أقل
-
-        # تسجيل استخدام الأداة (تقديري)
-        if "تمارين التنفس" in ai_content or "خذ نفساً" in ai_content:
-            logger.info("Tool used: breathing_exercise")
-        elif "تم حجز الجلسة" in ai_content or "booking" in ai_content:
-            logger.info("Tool used: schedule_session")
+        # Sliding Window Memory
+        system_msg = self.messages[0]
+        history = self.messages[1:]
+        history = history[-12:]
+        self.messages = [system_msg] + history
 
         return ai_content
