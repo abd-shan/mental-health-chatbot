@@ -7,7 +7,6 @@
 
 body {
     background: linear-gradient(145deg, #e6f0fa 0%, #d4e3f0 100%);
-    min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
