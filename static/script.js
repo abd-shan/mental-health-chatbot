@@ -5,18 +5,69 @@ const featureBtn = document.getElementById('feature-btn');
 const featurePanel = document.getElementById('feature-panel');
 
 
-if (featureBtn) {
-    featureBtn.addEventListener('click', () => {
-        featurePanel.classList.toggle('show');
+userInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = (this.scrollHeight) + 'px';
+});
+
+
+async function sendMessage() {
+    const text = userInput.value.trim();
+    if (text === '') return;
+
+    addMessage(text, 'user');
+    userInput.value = '';
+    userInput.style.height = 'auto'; //
+
+    sendBtn.disabled = true;
+
+    const typingIndicator = createTypingIndicator();
+    messagesContainer.appendChild(typingIndicator);
+    messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: 'smooth'
     });
 
+    try {
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text })
+        });
 
-    document.addEventListener('click', (e) => {
-        if (!featurePanel.contains(e.target) && !featureBtn.contains(e.target)) {
-            featurePanel.classList.remove('show');
+        const data = await response.json();
+
+        document.getElementById('typing')?.remove();
+
+        if (response.ok) {
+            setTimeout(() => {
+                addMessage(data.response, 'bot');
+            }, 300);
+        } else {
+            addMessage('عذراً، حدث خطأ. حاول مرة أخرى.', 'bot');
         }
-    });
+    } catch (error) {
+        document.getElementById('typing')?.remove();
+        addMessage('تعذر الاتصال بالخادم.', 'bot');
+    } finally {
+        sendBtn.disabled = false;
+        userInput.focus();
+    }
 }
+
+
+userInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        if (e.shiftKey) {
+
+            return;
+        } else {
+
+            e.preventDefault();
+            sendMessage();
+        }
+    }
+});
 
 
 function formatMessageText(text) {
@@ -84,48 +135,6 @@ function createTypingIndicator() {
 }
 
 
-async function sendMessage() {
-    const text = userInput.value.trim();
-    if (text === '') return;
-
-    addMessage(text, 'user');
-    userInput.value = '';
-
-    sendBtn.disabled = true;
-
-    const typingIndicator = createTypingIndicator();
-    messagesContainer.appendChild(typingIndicator);
-    messagesContainer.scrollTo({
-        top: messagesContainer.scrollHeight,
-        behavior: 'smooth'
-    });
-
-    try {
-        const response = await fetch('/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text })
-        });
-
-        const data = await response.json();
-
-        document.getElementById('typing')?.remove();
-
-        if (response.ok) {
-            setTimeout(() => {
-                addMessage(data.response, 'bot');
-            }, 300);
-        } else {
-            addMessage('عذراً، حدث خطأ. حاول مرة أخرى.', 'bot');
-        }
-    } catch (error) {
-        document.getElementById('typing')?.remove();
-        addMessage('تعذر الاتصال بالخادم.', 'bot');
-    } finally {
-        sendBtn.disabled = false;
-        userInput.focus();
-    }
-}
 
 
 sendBtn.addEventListener('click', sendMessage);

@@ -169,8 +169,8 @@ header p {
 }
 
 #user-input {
-    flex: 1;
-    padding: 14px 20px;
+flex: 1;
+    padding: 20px 30px;
     border: none;
     border-radius: 50px;
     background: #f0f7fc;
@@ -178,6 +178,12 @@ header p {
     outline: none;
     transition: all 0.3s ease;
     border: 1px solid transparent;
+    resize: none;
+    font-family: inherit;
+    line-height: 1.5;
+    max-height: 150px;
+    overflow-y: auto;
+    min-height: 50px;
 }
 
 #user-input:focus {
@@ -248,8 +254,6 @@ header p {
 .messages::-webkit-scrollbar-thumb:hover {
     background: #1e6f9c;
 }
-
-
 @media (max-width: 600px) {
     .container {
         height: 95vh;
@@ -263,35 +267,92 @@ header p {
     }
 
     .input-area {
-        padding: 10px;
-        gap: 8px;
-        flex-wrap: wrap;
+        padding: 8px 12px;
+        gap: 6px;
+        flex-wrap: nowrap;
+    }
+
+    #user-input {
+        padding: 15px 20px;
+        font-size: 0.9rem;
+        min-width: 0;
+        flex: 1 1 auto;
+        min-height: 40px;
+        max-height: 2rem;
+    }
+
+    #send-btn {
+        padding: 8px 16px;
+        font-size: 0.9rem;
+        flex: 0 0 auto;
+        height: 40px;
+        line-height: 1;
+    }
+
+    header p {
+        font-size: 0.9rem;
+    }
+    .bubble {
+        font-size: 0.9rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .input-area {
+        padding: 6px 10px;
+        gap: 4px;
+    }
+
+    #user-input {
+        padding: 15px 20px;
+        font-size: 0.85rem;
+        min-height: 34px;
+        max-height: 1rem;
+    }
+
+    #send-btn {
+        padding: 6px 12px;
+        font-size: 0.85rem;
+        height: 36px;
+    }
+
+    header h1 {
+        font-size: 1rem;
+    }
+    header p {
+        font-size: 0.8rem;
+    }
+    .bubble {
+        font-size: 0.85rem;
+    }
+}
+
+@media (max-width: 360px) {
+    .input-area {
+        padding: 5px 8px;
+        gap: 3px;
     }
     #user-input {
-        padding: 12px 16px;
-        font-size: 1rem;
-        min-width: 0;
-        flex: 1 1 150px;
+        padding: 5px 8px;
+        font-size: 0.8rem;
+        min-height: 34px;
+        max-height: 1rem;
     }
     #send-btn {
-        padding: 12px 20px;
-        font-size:1rem;
-        flex: 0 0 auto;
+        padding: 5px 10px;
+        font-size: 0.8rem;
+        height: 34px;
+    }
+    header h1 {
+        font-size: 0.9rem;
+    }
+    header p {
+        font-size: 0.75rem;
+    }
+    .bubble {
+        font-size: 0.8rem;
     }
 }
-
-
-@media (max-width: 400px) {
-    .input-area {
-        flex-direction: column;
-    }
-    #send-btn {
-        width: 100%;
-        padding: 12px;
-    }
-}
-
-
 .bubble {
 
 
