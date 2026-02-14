@@ -5,6 +5,23 @@ const featureBtn = document.getElementById('feature-btn');
 const featurePanel = document.getElementById('feature-panel');
 
 
+if (featureBtn && featurePanel) {
+
+    featureBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        featurePanel.classList.toggle('show');
+    });
+
+
+
+    document.addEventListener('click', (e) => {
+        if (!featurePanel.contains(e.target) && !featureBtn.contains(e.target)) {
+            featurePanel.classList.remove('show');
+        }
+    });
+}
+
+
 userInput.addEventListener('input', function() {
     this.style.height = 'auto';
     this.style.height = (this.scrollHeight) + 'px';
@@ -17,7 +34,7 @@ async function sendMessage() {
 
     addMessage(text, 'user');
     userInput.value = '';
-    userInput.style.height = 'auto'; //
+    userInput.style.height = 'auto';
 
     sendBtn.disabled = true;
 
@@ -62,7 +79,6 @@ userInput.addEventListener('keydown', (e) => {
 
             return;
         } else {
-
             e.preventDefault();
             sendMessage();
         }
@@ -71,24 +87,13 @@ userInput.addEventListener('keydown', (e) => {
 
 
 function formatMessageText(text) {
-
     let safeText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-
-    safeText = safeText.replace(/^#+\s+/gm, ''); //  remove '#'
-
-    //remove '*' '-'
-    safeText = safeText.replace(/^[-*]\s+/gm, '');
-
+    safeText = safeText.replace(/^#+\s+/gm, ''); // إزالة علامات العناوين
+    safeText = safeText.replace(/^[-*]\s+/gm, ''); // إزالة علامات القوائم
     safeText = safeText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-
-
     safeText = safeText.replace(/\*(?!\s)(.*?)\*(?!\s)/g, '<em>$1</em>');
-
-
     const paragraphs = safeText.split('\n').filter(line => line.trim() !== '');
     if (paragraphs.length === 0) return '<br>';
-
     return paragraphs.map(p => `<p>${p}</p>`).join('');
 }
 
@@ -135,14 +140,7 @@ function createTypingIndicator() {
 }
 
 
-
-
 sendBtn.addEventListener('click', sendMessage);
-userInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendMessage();
-    }
-});
+
 
 userInput.focus();
