@@ -165,7 +165,7 @@ class ConversationController:
 
     def chat(self, user_input: str) -> str:
 
-        # فلترة المحتوى المحرم
+        # haram filter
         if contains_prohibited_content(user_input):
             return (
                 "أفهم أن هناك أموراً قد تشغل بالك، لكن من المهم أن نحافظ على نقاء النفس وسلامتها.\n\n"

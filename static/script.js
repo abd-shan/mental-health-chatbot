@@ -88,8 +88,8 @@ userInput.addEventListener('keydown', (e) => {
 
 function formatMessageText(text) {
     let safeText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    safeText = safeText.replace(/^#+\s+/gm, ''); // إزالة علامات العناوين
-    safeText = safeText.replace(/^[-*]\s+/gm, ''); // إزالة علامات القوائم
+    safeText = safeText.replace(/^#+\s+/gm, '');
+    safeText = safeText.replace(/^[-*]\s+/gm, '');
     safeText = safeText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     safeText = safeText.replace(/\*(?!\s)(.*?)\*(?!\s)/g, '<em>$1</em>');
     const paragraphs = safeText.split('\n').filter(line => line.trim() !== '');

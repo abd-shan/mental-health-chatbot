@@ -35,15 +35,15 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Mental Health Chatbot",
-    docs_url=None,     # إخفاء docs في التجربة العامة
+    docs_url=None,
     redoc_url=None
 )
 
 # ===============================
-# Middleware (مهم جداً على Railway)
+# Middleware (Railway)
 # ===============================
 
-# دعم Reverse Proxy (Railway)
+# Reverse Proxy (Railway)
 
 
 app.add_middleware(
@@ -69,11 +69,11 @@ app.mount(
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 # ===============================
-# Session Store (مؤقت للتجربة)
+# Session Store (temp)
 # ===============================
 
 sessions: dict[str, ConversationController] = {}
-MAX_SESSIONS = 500  # منع استهلاك الذاكرة
+MAX_SESSIONS = 500  # memory limit
 
 def get_or_create_session(session_id: str) -> ConversationController:
     if session_id not in sessions:
@@ -108,7 +108,7 @@ async def read_root(request: Request, response: Response):
             key="session_id",
             value=session_id,
             httponly=True,
-            secure=True,     # مهم مع HTTPS
+            secure=True,
             samesite="lax"
         )
 
@@ -148,7 +148,7 @@ async def chat_endpoint(req: ChatRequest, request: Request, response: Response):
     return ChatResponse(response=response_text)
 
 # ===============================
-# Local Run (للجهاز فقط)
+# Local Run
 # ===============================
 
 if __name__ == "__main__":
