@@ -2,49 +2,22 @@ from fastapi import FastAPI, Request, Response, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pathlib import Path
 from dotenv import load_dotenv
+from typing import Optional
 import uuid
 import logging
-import os
 
 from agent import ConversationController
 
-# ===============================
-# Environment
-# ===============================
-
 load_dotenv()
 
-# ===============================
-# Logging
-# ===============================
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ===============================
-# App Initialization
-# ===============================
-
-app = FastAPI(
-    title="Mental Health Chatbot",
-    docs_url=None,
-    redoc_url=None
-)
-
-# ===============================
-# Middleware (Railway)
-# ===============================
-
-# Reverse Proxy (Railway)
-
+app = FastAPI(title="Mental Health Chatbot")
 
 app.add_middleware(
     CORSMiddleware,
@@ -54,96 +27,62 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ===============================
-# Static & Templates
-# ===============================
-
 BASE_DIR = Path(__file__).resolve().parent
 
-app.mount(
-    "/static",
-    StaticFiles(directory=BASE_DIR / "static"),
-    name="static"
-)
+app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
-# ===============================
-# Session Store (temp)
-# ===============================
-
-sessions: dict[str, ConversationController] = {}
-MAX_SESSIONS = 500  # memory limit
-
-def get_or_create_session(session_id: str) -> ConversationController:
-    if session_id not in sessions:
-        if len(sessions) > MAX_SESSIONS:
-            logger.warning("Session limit reached. Clearing memory.")
-            sessions.clear()
-        sessions[session_id] = ConversationController()
-    return sessions[session_id]
+sessions = {}
 
 # ===============================
-# Models
+# Request Models
 # ===============================
 
 class ChatRequest(BaseModel):
     message: str
+    conversation_id: Optional[str] = None
+    patient_profile: Optional[dict] = None
+    medical_context: Optional[dict] = None
+
 
 class ChatResponse(BaseModel):
     response: str
+
+# ===============================
+# Session Manager
+# ===============================
+
+def get_or_create_session(session_id: str):
+    if session_id not in sessions:
+        sessions[session_id] = ConversationController()
+    return sessions[session_id]
 
 # ===============================
 # Routes
 # ===============================
 
 @app.get("/", response_class=HTMLResponse)
-async def read_root(request: Request, response: Response):
+async def read_root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
-    session_id = request.cookies.get("session_id")
-
-    if not session_id:
-        session_id = str(uuid.uuid4())
-        response.set_cookie(
-            key="session_id",
-            value=session_id,
-            httponly=True,
-            secure=True,
-            samesite="lax"
-        )
-
-    get_or_create_session(session_id)
-
-    return templates.TemplateResponse(
-        "index.html",
-        {"request": request}
-    )
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(req: ChatRequest, request: Request, response: Response):
+async def chat_endpoint(req: ChatRequest):
 
-    session_id = request.cookies.get("session_id")
+    conversation_id = req.conversation_id or str(uuid.uuid4())
 
-    if not session_id:
-        session_id = str(uuid.uuid4())
-        response.set_cookie(
-            key="session_id",
-            value=session_id,
-            httponly=True,
-            secure=True,
-            samesite="lax"
-        )
-
-    controller = get_or_create_session(session_id)
+    controller = get_or_create_session(conversation_id)
 
     try:
-        response_text = controller.chat(req.message)
-    except Exception as e:
-        logger.exception("Chat processing failed")
-        raise HTTPException(
-            status_code=500,
-            detail="حدث خطأ مؤقت في المعالجة. حاول مرة أخرى."
+        response_text = controller.chat(
+            user_input=req.message,
+            patient_profile=req.patient_profile,
+            medical_context=req.medical_context
         )
+    except Exception:
+        logger.exception("Chat failed")
+        raise HTTPException(status_code=500, detail="خطأ مؤقت")
 
     return ChatResponse(response=response_text)
 

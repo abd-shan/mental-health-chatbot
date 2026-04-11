@@ -3,7 +3,7 @@ import json
 import random
 import string
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 import logging
 
 from dotenv import load_dotenv
@@ -77,32 +77,61 @@ llm = ChatOpenAI(
 )
 
 # ==============================
-# System Prompt
+# Base Prompt
 # ==============================
 
-SYSTEM_PROMPT = """
-أنت مساعد متخصص في الدعم النفسي تم تطويرك ضمن منصة "عون" التي هي حاليا قيم التطوير. 
+BASE_SYSTEM_PROMPT = """
+أنت مساعد متخصص في الدعم النفسي ضمن منصة عون.
 
 الهوية:
 - التطبيق من تطوير فريق منصة عون.
 - المطور التقني: المهندس عبدالقادر الشنبور.
-- تقدم دعماً نفسياً متوافقاً مع القيم الإسلامية والأخلاق السليمة.
 
 المبادئ:
-- عزز الطمأنينة، الصبر، ضبط النفس، والعفة.
-- لا تشجع أو تبرر أي سلوك محرم أو ضار مثل الإباحية، الزنا، الخمور، أو الإدمان.
-- إذا طُلب أمر مخالف، وجّه بلطف نحو بديل صحي ونقي.
-- لا تكن واعظاً قاسياً، بل موجهاً رحيماً.
-- لا تقدم تشخيصات طبية.
-- استخدم لغة هادئة متزنة.
-- كن ذكيا في الاجابة وداعما للشخص الذي يسأل .
-- كن واضحا ودقيقا باجابة كل سؤال لا تكثر من التقاصيل .
+- قدم دعماً نفسياً هادئاً.
+- لا تقدم تشخيصاً طبياً.
+- عزز القيم الأخلاقية.
+- لا تشجع السلوك الضار.
+- كن مختصراً وواضحاً.
+"""
 
-آلية التفاعل:
-- افهم السياق أولاً.
-- اسأل أسئلة استكشافية.
-- يمكن إدماج بعد روحي عند الحاجة بشكل طبيعي وغير مباشر.
-- لا تتأخر في الاجابة كن سريعا.
+# ==============================
+# Dynamic Context Builder
+# ==============================
+
+def build_dynamic_context(patient_profile=None, medical_context=None):
+
+    name = "غير معروف"
+    age = "غير متوفر"
+    gender = "غير محدد"
+
+    history = "لا توجد معلومات طبية متاحة"
+    last_visit = "غير معروفة"
+
+    if patient_profile:
+        name = patient_profile.get("name") or "غير معروف"
+        age = patient_profile.get("age") or "غير متوفر"
+        gender = patient_profile.get("gender") or "غير محدد"
+
+    if medical_context:
+        history = medical_context.get("history") or "لا توجد معلومات طبية متاحة"
+        last_visit = medical_context.get("last_visit") or "غير معروفة"
+
+    return f"""
+بيانات المستخدم:
+الاسم: {name}
+العمر: {age}
+الجنس: {gender}
+
+السجل الطبي:
+{history}
+
+آخر مراجعة:
+{last_visit}
+
+إذا كانت البيانات ناقصة:
+- تعامل بمرونة
+- لا تفترض معلومات غير موجودة
 """
 
 # ==============================
@@ -112,22 +141,8 @@ SYSTEM_PROMPT = """
 agent_executor = create_agent(
     model=llm,
     tools=tools,
-    system_prompt=SYSTEM_PROMPT,
+    system_prompt=BASE_SYSTEM_PROMPT,
 )
-
-# ==============================
-# Content Filter
-# ==============================
-
-def contains_prohibited_content(text: str) -> bool:
-    text = text.lower()
-    prohibited_keywords = [
-        "اباحية", "اباحي", "porn",
-        "زنا", "علاقة محرمة",
-        "خمور", "كحول",
-        "عادة سرية", "استمناء"
-    ]
-    return any(word in text for word in prohibited_keywords)
 
 # ==============================
 # Intent Detection
@@ -135,70 +150,66 @@ def contains_prohibited_content(text: str) -> bool:
 
 def detect_intent(text: str) -> str:
     text = text.lower()
+
     if any(word in text for word in ["اشرح", "ما هو", "تعريف"]):
         return "education"
+
     elif any(word in text for word in ["متوتر", "قلق", "حزين", "ضيق"]):
         return "support"
+
     elif any(word in text for word in ["احجز", "جلسة", "موعد"]):
         return "booking"
-    else:
-        return "casual"
+
+    return "casual"
 
 # ==============================
-# Conversation Controller
+# Controller
 # ==============================
 
 class ConversationController:
 
     def __init__(self):
         self.messages: List[BaseMessage] = []
-        self.messages.append(SystemMessage(content=SYSTEM_PROMPT))
-        self.state = "neutral"
+        self.messages.append(SystemMessage(content=BASE_SYSTEM_PROMPT))
 
     def _call_llm(self, messages: List[BaseMessage]) -> str:
         try:
             response = llm.invoke(messages)
             return response.content
-        except Exception as e:
-            logger.exception("LLM call failed")
-            return "حدث خطأ مؤقت في المعالجة، حاول مرة أخرى."
+        except Exception:
+            logger.exception("LLM failed")
+            return "حدث خطأ مؤقت."
 
-    def chat(self, user_input: str) -> str:
+    def chat(
+        self,
+        user_input: str,
+        patient_profile: Optional[dict] = None,
+        medical_context: Optional[dict] = None
+    ) -> str:
 
-        # haram filter
-        if contains_prohibited_content(user_input):
-            return (
-                "أفهم أن هناك أموراً قد تشغل بالك، لكن من المهم أن نحافظ على نقاء النفس وسلامتها.\n\n"
-                "إذا كنت تواجه صراعاً داخلياً، يمكننا الحديث عن طرق صحية ونقية "
-                "للتعامل مع الضغوط والرغبات.\n\n"
-                "ما الذي تشعر به تحديداً؟"
-            )
+        dynamic_context = build_dynamic_context(patient_profile, medical_context)
 
         self.messages.append(HumanMessage(content=user_input))
+
+        temp_messages = self.messages + [
+            SystemMessage(content=dynamic_context)
+        ]
 
         intent = detect_intent(user_input)
 
         if intent in ["education", "casual"]:
-            ai_content = self._call_llm(self.messages)
+            ai_content = self._call_llm(temp_messages)
 
         else:
-            state_instruction = SystemMessage(
-                content=f"الحالة الحالية: {intent}. استخدم الأدوات فقط إذا لزم الأمر."
-            )
-            temp_messages = self.messages + [state_instruction]
             try:
                 result = agent_executor.invoke({"messages": temp_messages})
                 ai_content = result["messages"][-1].content
             except Exception:
                 logger.exception("Agent failed")
-                ai_content = "حدث خطأ مؤقت، حاول مرة أخرى."
+                ai_content = "حدث خطأ مؤقت."
 
         self.messages.append(AIMessage(content=ai_content))
 
-        # Sliding Window Memory
-        system_msg = self.messages[0]
-        history = self.messages[1:]
-        history = history[-12:]
-        self.messages = [system_msg] + history
+        self.messages = [self.messages[0]] + self.messages[-12:]
 
         return ai_content

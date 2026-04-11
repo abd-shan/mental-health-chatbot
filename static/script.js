@@ -5,14 +5,31 @@ const featureBtn = document.getElementById('feature-btn');
 const featurePanel = document.getElementById('feature-panel');
 
 
-if (featureBtn && featurePanel) {
+// =====================================
+// Conversation Identity
+// =====================================
 
+function getConversationId() {
+    let conversationId = localStorage.getItem('conversation_id');
+
+    if (!conversationId) {
+        conversationId = crypto.randomUUID();
+        localStorage.setItem('conversation_id', conversationId);
+    }
+
+    return conversationId;
+}
+
+
+// =====================================
+// Feature Panel
+// =====================================
+
+if (featureBtn && featurePanel) {
     featureBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         featurePanel.classList.toggle('show');
     });
-
-
 
     document.addEventListener('click', (e) => {
         if (!featurePanel.contains(e.target) && !featureBtn.contains(e.target)) {
@@ -22,81 +39,42 @@ if (featureBtn && featurePanel) {
 }
 
 
-userInput.addEventListener('input', function() {
+// =====================================
+// Auto Resize Textarea
+// =====================================
+
+userInput.addEventListener('input', function () {
     this.style.height = 'auto';
-    this.style.height = (this.scrollHeight) + 'px';
+    this.style.height = `${this.scrollHeight}px`;
 });
 
 
-async function sendMessage() {
-    const text = userInput.value.trim();
-    if (text === '') return;
-
-    addMessage(text, 'user');
-    userInput.value = '';
-    userInput.style.height = 'auto';
-
-    sendBtn.disabled = true;
-
-    const typingIndicator = createTypingIndicator();
-    messagesContainer.appendChild(typingIndicator);
-    messagesContainer.scrollTo({
-        top: messagesContainer.scrollHeight,
-        behavior: 'smooth'
-    });
-
-    try {
-        const response = await fetch('/chat', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ message: text })
-        });
-
-        const data = await response.json();
-
-        document.getElementById('typing')?.remove();
-
-        if (response.ok) {
-            setTimeout(() => {
-                addMessage(data.response, 'bot');
-            }, 300);
-        } else {
-            addMessage('عذراً، حدث خطأ. حاول مرة أخرى.', 'bot');
-        }
-    } catch (error) {
-        document.getElementById('typing')?.remove();
-        addMessage('تعذر الاتصال بالخادم.', 'bot');
-    } finally {
-        sendBtn.disabled = false;
-        userInput.focus();
-    }
-}
-
-
-userInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        if (e.shiftKey) {
-
-            return;
-        } else {
-            e.preventDefault();
-            sendMessage();
-        }
-    }
-});
-
+// =====================================
+// Message Formatter
+// =====================================
 
 function formatMessageText(text) {
     let safeText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
     safeText = safeText.replace(/^#+\s+/gm, '');
     safeText = safeText.replace(/^[-*]\s+/gm, '');
+
     safeText = safeText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     safeText = safeText.replace(/\*(?!\s)(.*?)\*(?!\s)/g, '<em>$1</em>');
-    const paragraphs = safeText.split('\n').filter(line => line.trim() !== '');
+
+    const paragraphs = safeText
+        .split('\n')
+        .filter(line => line.trim() !== '');
+
     if (paragraphs.length === 0) return '<br>';
+
     return paragraphs.map(p => `<p>${p}</p>`).join('');
 }
 
+
+// =====================================
+// Add Message
+// =====================================
 
 function addMessage(text, sender) {
     const messageDiv = document.createElement('div');
@@ -122,6 +100,10 @@ function addMessage(text, sender) {
 }
 
 
+// =====================================
+// Typing Indicator
+// =====================================
+
 function createTypingIndicator() {
     const indicatorDiv = document.createElement('div');
     indicatorDiv.classList.add('message', 'bot-message');
@@ -136,11 +118,100 @@ function createTypingIndicator() {
     }
 
     indicatorDiv.appendChild(typingBubble);
+
     return indicatorDiv;
 }
 
 
+// =====================================
+// Send Message
+// =====================================
+
+async function sendMessage() {
+    const text = userInput.value.trim();
+
+    if (text === '' || sendBtn.disabled) return;
+
+    addMessage(text, 'user');
+
+    userInput.value = '';
+    userInput.style.height = 'auto';
+
+    sendBtn.disabled = true;
+
+    const typingIndicator = createTypingIndicator();
+    messagesContainer.appendChild(typingIndicator);
+
+    messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior: 'smooth'
+    });
+
+    try {
+        const payload = {
+            message: text,
+            conversation_id: getConversationId(),
+
+            // جاهزة للتكامل مع NestJS لاحقاً
+            patient_profile: null,
+            medical_context: null
+        };
+
+        const response = await fetch('/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const data = await response.json();
+
+        document.getElementById('typing')?.remove();
+
+        if (response.ok) {
+            setTimeout(() => {
+                addMessage(data.response, 'bot');
+            }, 300);
+        } else {
+            addMessage('عذراً، حدث خطأ. حاول مرة أخرى.', 'bot');
+        }
+
+    } catch (error) {
+        document.getElementById('typing')?.remove();
+        addMessage('تعذر الاتصال بالخادم.', 'bot');
+    } finally {
+        sendBtn.disabled = false;
+        userInput.focus();
+    }
+}
+
+
+// =====================================
+// Keyboard Events
+// =====================================
+
+userInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+        if (e.shiftKey) {
+            return;
+        } else {
+            e.preventDefault();
+            sendMessage();
+        }
+    }
+});
+
+
+// =====================================
+// Events
+// =====================================
+
 sendBtn.addEventListener('click', sendMessage);
 
+
+// =====================================
+// Initial Focus
+// =====================================
 
 userInput.focus();
