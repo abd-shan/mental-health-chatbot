@@ -33,8 +33,11 @@ build/
 # FastAPI
 *.sqlite3
 
-# Node (لو أضفت frontend لاحقاً)
+
 node_modules/
 
 # uv
 uv.lock
+
+
+
