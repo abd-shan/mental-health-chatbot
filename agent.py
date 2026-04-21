@@ -166,36 +166,96 @@ def detect_intent(text: str) -> str:
 # Controller
 # ==============================
 
+
 class ConversationController:
     def __init__(self):
         self.messages: List[BaseMessage] = []
         self.messages.append(SystemMessage(content=BASE_SYSTEM_PROMPT))
-        self.target_sentiment = 1.0 
+        self.target_sentiment = 1.0
+        
+        # === متغيرات PID والمرشحات ===
+        self.prev_error = 0.0
+        self.integral = 0.0
+        self.filtered_sentiment = 1.0  # قيمة PV بعد المرشح الرقمي
+        self.last_output = 0.0
+        
+        # معاملات التحكم PID (قابلة للضبط)
+        self.Kp = 1.2   # Proportional Gain
+        self.Ki = 0.3   # Integral Gain
+        self.Kd = 0.5   # Derivative Gain
+        self.dt = 1.0   # فترة العينة (افتراضية 1 لأن كل رسالة هي خطوة)
+        
+        # معامل المرشح الرقمي (Low-pass Filter) لتنعيم PV
+        self.ALPHA_FILTER = 0.2
 
     def _monitor_sentiment(self, text: str) -> float:
-        negative_indicators = ["حزين", "قلق", "متوتر", "ضيق", "خائف", "تعبان"]
+        """مستشعر رقمي خام (Raw Sensor)"""
+        negative_indicators = ["حزين", "قلق", "متوتر", "ضيق", "خائف", "تعبان", "غاضب", "مكتئب"]
+        positive_indicators = ["سعيد", "مرتاح", "ممتن", "هادئ", "متفائل"]
         score = 1.0
+        
         for word in negative_indicators:
             if word in text:
-                score -= 0.2
-        return max(score, 0.0)
+                score -= 0.15
+        for word in positive_indicators:
+            if word in text:
+                score += 0.1
+                
+        return max(0.0, min(score, 1.0))
 
-    def _verify_output(self, ai_response: str) -> bool:
-        forbidden_patterns = ["أشخص حالتك بـ", "مرضك هو", "انتحار", "أذى"]
-        return not any(pattern in ai_response for pattern in forbidden_patterns)
+    def _apply_low_pass_filter(self, raw_value: float) -> float:
+        """مرشح رقمي من الدرجة الأولى (Exponential Filter) لتنعيم القراءات"""
+        self.filtered_sentiment = self.ALPHA_FILTER * raw_value + (1 - self.ALPHA_FILTER) * self.filtered_sentiment
+        return self.filtered_sentiment
+
+    def _pid_control(self, error: float) -> float:
+        """حساب إشارة التحكم (Control Signal) باستخدام PID"""
+        # التناسبي (Proportional)
+        P = self.Kp * error
+        
+        # التراكمي (Integral) مع مقاومة التشبع (Anti-windup)
+        self.integral += error * self.dt
+        # تحديد حدود التراكم لتجنب التشبع
+        self.integral = max(-2.0, min(self.integral, 2.0))
+        I = self.Ki * self.integral
+        
+        # التفاضلي (Derivative)
+        derivative = (error - self.prev_error) / self.dt
+        D = self.Kd * derivative
+        
+        # حفظ الخطأ السابق
+        self.prev_error = error
+        
+        # إشارة التحكم النهائية
+        control_signal = P + I + D
+        return control_signal
 
     def chat(self, user_input: str, patient_profile: Optional[dict] = None, medical_context: Optional[dict] = None) -> dict:
-        # 1. Measurement
-        current_sentiment = self._monitor_sentiment(user_input)
+        # 1. القياس الخام (Raw Measurement)
+        raw_sentiment = self._monitor_sentiment(user_input)
         
-        # 2. Error Calculation
+        # 2. تطبيق المرشح الرقمي للحصول على PV الحقيقي (مستقر)
+        current_sentiment = self._apply_low_pass_filter(raw_sentiment)
+        
+        # 3. حساب الخطأ (Error = SP - PV)
         error = self.target_sentiment - current_sentiment
         
-        # 3. Control Instruction
+        # 4. حساب إشارة التحكم PID
+        control_signal = self._pid_control(error)
+        
+        # 5. بناء تعليمات التحكم بناءً على إشارة PID
         control_instruction = ""
-        if error > 0.4:
-            control_instruction = "\nتنبيه للنظام: المستخدم يمر بحالة توتر عالية. ركز على تقنيات التنفس والهدوء فوراً."
+        if error > 0.35:
+            control_instruction = "\n[تحكم PID]: حالة توتر عالية. استخدم تقنيات التنفس والتهدئة الفورية."
+        elif error > 0.15:
+            control_instruction = "\n[تحكم PID]: توتر متوسط. حافظ على نبرة داعمة وقدم تمارين بسيطة."
+        else:
+            control_instruction = "\n[تحكم PID]: حالة مستقرة. قدم استشارات عادية."
 
+        # يمكن إضافة تأثير control_signal على اختيار نوع الرد أو على معامل temperature
+        # مثلاً: إذا كان control_signal كبيراً نزيد من التركيز على التعاطف.
+        
+        # 6. بناء السياق وإرسال الطلب للنموذج اللغوي
         dynamic_context = build_dynamic_context(patient_profile, medical_context)
         self.messages.append(HumanMessage(content=user_input))
 
@@ -223,11 +283,13 @@ class ConversationController:
         self.messages.append(AIMessage(content=ai_content))
         self.messages = [self.messages[0]] + self.messages[-12:]
 
+        # 7. إرجاع البيانات مع قيم حقيقية بعد المعالجة
         return {
             "response": ai_content,
             "status": {
-                "sentiment_score": current_sentiment,
-                "error_level": round(error, 2),
+                "sentiment_score": round(current_sentiment, 3),      # PV بعد المرشح
+                "error_level": round(error, 3),                      # الخطأ الحقيقي
+                "control_signal": round(control_signal, 3),          # إشارة PID
                 "intent": intent
             }
         }
