@@ -305,33 +305,6 @@ function clearChatHistory() {
 }
 
 // =====================================
-// إضافة زر إعادة الضبط (Reset) بشكل ديناميكي
-// =====================================
-function addControlButtons() {
-    const container = document.querySelector('.container');
-    const btnContainer = document.createElement('div');
-    btnContainer.className = 'control-buttons';
-    btnContainer.innerHTML = `
-        <button id="reset-chat" class="icon-btn" title="مسح المحادثة">🗑️</button>
-        <button id="reset-system" class="icon-btn" title="إعادة ضبط النظام">🔄</button>
-    `;
-    container.appendChild(btnContainer);
-
-    document.getElementById('reset-chat').addEventListener('click', () => {
-        if (confirm('هل تريد مسح سجل المحادثة؟')) {
-            clearChatHistory();
-        }
-    });
-
-    document.getElementById('reset-system').addEventListener('click', () => {
-        // إعادة ضبط قيم لوحة التحكم إلى الوضع الافتراضي
-        updateControlVisuals({ sentiment_score: 1.0, error_level: 0.0 });
-        localStorage.removeItem('last_dashboard_state');
-        // لا نمسح المحادثة، فقط نعيد المؤشرات
-    });
-}
-
-// =====================================
 // إضافة تلميحات توضيحية للوحة التحكم (Tooltips)
 // =====================================
 function addDashboardTooltips() {
@@ -349,7 +322,6 @@ function addDashboardTooltips() {
 // =====================================
 window.addEventListener('DOMContentLoaded', () => {
     loadChatHistory();
-    addControlButtons();
     addDashboardTooltips();
     userInput.focus();
 });
