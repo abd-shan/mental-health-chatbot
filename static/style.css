@@ -597,3 +597,27 @@ header p {
         padding: 5px 12px;
     }
 }
+
+
+
+/* تعديل بسيط على نقطة الحالة لتفعيل التدرج */
+.status-dot {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background-color: #2ecc71;  /* قيمة افتراضية */
+    box-shadow: 0 0 10px currentColor;
+    transition: box-shadow 0.2s;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 0 5px currentColor; }
+    50% { box-shadow: 0 0 15px currentColor, 0 0 5px currentColor; }
+    100% { box-shadow: 0 0 5px currentColor; }
+}
+
+/* وميض الخطر (يتم تطبيقه عند الخطأ العالي فقط) */
+.control-dashboard.disturbance {
+    animation: alertBlink 1.2s infinite;
+}
