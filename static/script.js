@@ -9,33 +9,26 @@ const statusDot = document.getElementById('status-dot');
 const statusText = document.getElementById('status-text');
 const dashboard = document.getElementById('control-dashboard');
 
-
 // =====================================
 // Conversation Identity
 // =====================================
-
 function getConversationId() {
     let conversationId = localStorage.getItem('conversation_id');
-
     if (!conversationId) {
         conversationId = crypto.randomUUID();
         localStorage.setItem('conversation_id', conversationId);
     }
-
     return conversationId;
 }
-
 
 // =====================================
 // Feature Panel
 // =====================================
-
 if (featureBtn && featurePanel) {
     featureBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         featurePanel.classList.toggle('show');
     });
-
     document.addEventListener('click', (e) => {
         if (!featurePanel.contains(e.target) && !featureBtn.contains(e.target)) {
             featurePanel.classList.remove('show');
@@ -43,85 +36,59 @@ if (featureBtn && featurePanel) {
     });
 }
 
-
 // =====================================
 // Auto Resize Textarea
 // =====================================
-
 userInput.addEventListener('input', function () {
     this.style.height = 'auto';
     this.style.height = `${this.scrollHeight}px`;
 });
 
-
 // =====================================
 // Message Formatter
 // =====================================
-
 function formatMessageText(text) {
     let safeText = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
     safeText = safeText.replace(/^#+\s+/gm, '');
     safeText = safeText.replace(/^[-*]\s+/gm, '');
-
     safeText = safeText.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     safeText = safeText.replace(/\*(?!\s)(.*?)\*(?!\s)/g, '<em>$1</em>');
-
-    const paragraphs = safeText
-        .split('\n')
-        .filter(line => line.trim() !== '');
-
+    const paragraphs = safeText.split('\n').filter(line => line.trim() !== '');
     if (paragraphs.length === 0) return '<br>';
-
     return paragraphs.map(p => `<p>${p}</p>`).join('');
 }
 
-
-// ====================== إضافة المتغيرات العامة في بداية الملف ======================
-let displayPV = 1.0;        // القيمة المعروضة حالياً للـ PV (بعد التنعيم)
-let displayError = 0.0;     // القيمة المعروضة حالياً للـ Error (بعد التنعيم)
-let targetPV = 1.0;         // القيمة الهدف القادمة من السيرفر
-let targetError = 0.0;      // قيمة الخطأ القادمة من السيرفر
-let animFrame = null;       // مؤشر إطار الرسوم المتحركة
-const ALPHA = 0.12;         // معامل التنعيم (كلما قل كان التنعيم أبطأ وأكثر سلاسة)
-
 // =====================================
-// دالة التنعيم والرسوم المتحركة (EMA + RAF)
+// متغيرات التحكم والتنعيم (EMA + RAF)
 // =====================================
+let displayPV = 1.0;
+let displayError = 0.0;
+let targetPV = 1.0;
+let targetError = 0.0;
+let animFrame = null;
+const ALPHA = 0.12;
+
 function smoothUpdate(newPV, newError) {
-    // تحديث القيم الهدف
     targetPV = newPV;
     targetError = newError;
-
-    // إذا لم تكن هناك حركة متحركة نشطة، ابدأ واحدة
     if (!animFrame) {
         animFrame = requestAnimationFrame(updateCounters);
     }
 }
 
 function updateCounters() {
-    // تطبيق Exponential Moving Average
     displayPV = displayPV + ALPHA * (targetPV - displayPV);
     displayError = displayError + ALPHA * (targetError - displayError);
 
-    // تحديث عناصر HTML بالقيم الجديدة (بتنسيق رقمي)
     pvElement.textContent = displayPV.toFixed(3);
     errorElement.textContent = displayError.toFixed(3);
 
-    // ===== تطبيق الألوان المتدرجة (Gradient) =====
-    // تحويل قيمة الخطأ (0.0 إلى 1.0) إلى درجة لون من الأخضر (120) إلى الأحمر (0)
-    // نربط الخطأ بـ HSL: Hue = 120 * (1 - min(error, 1.0))
     const errorClamped = Math.min(displayError, 1.0);
-    const hue = 120 * (1 - errorClamped); // 120 = أخضر، 0 = أحمر
-    const saturation = 85;
-    const lightness = 55;
-
-    // تطبيق اللون على النقطة والنص
-    const color = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+    const hue = 120 * (1 - errorClamped);
+    const color = `hsl(${hue}, 85%, 55%)`;
     statusDot.style.backgroundColor = color;
     statusDot.style.boxShadow = `0 0 15px ${color}`;
 
-    // تغيير نص الحالة بناءً على الخطأ
     if (displayError > 0.55) {
         statusText.textContent = 'خطر';
         dashboard.classList.add('disturbance');
@@ -133,45 +100,33 @@ function updateCounters() {
         dashboard.classList.remove('disturbance');
     }
 
-    // التحقق من الوصول إلى الهدف (بفارق بسيط) لإنهاء الأنيميشن
     const diffPV = Math.abs(targetPV - displayPV);
     const diffErr = Math.abs(targetError - displayError);
 
     if (diffPV > 0.001 || diffErr > 0.001) {
-        // استمرار الحركة
         animFrame = requestAnimationFrame(updateCounters);
     } else {
-        // إنهاء الحركة
         animFrame = null;
-        // ضبط القيمة النهائية بدقة
         pvElement.textContent = targetPV.toFixed(3);
         errorElement.textContent = targetError.toFixed(3);
     }
 }
 
-// =====================================
-// تعديل دالة updateControlVisuals لاستدعاء نظام التنعيم
-// =====================================
 function updateControlVisuals(status) {
     if (!status) return;
-
     const sentiment = status.sentiment_score ?? 1.0;
     const error = status.error_level ?? 0.0;
-
-    // بدلاً من التحديث المباشر، نرسل القيم إلى نظام التنعيم
     smoothUpdate(sentiment, error);
+    // حفظ الحالة في localStorage
+    localStorage.setItem('last_dashboard_state', JSON.stringify({ pv: sentiment, error: error }));
 }
 
-
-
 // =====================================
-// Add Message
+// Add Message (مع حفظ تلقائي)
 // =====================================
-
 function addMessage(text, sender) {
     const messageDiv = document.createElement('div');
-    messageDiv.classList.add('message');
-    messageDiv.classList.add(sender === 'user' ? 'user-message' : 'bot-message');
+    messageDiv.classList.add('message', sender === 'user' ? 'user-message' : 'bot-message');
 
     const bubble = document.createElement('div');
     bubble.classList.add('bubble');
@@ -189,13 +144,13 @@ function addMessage(text, sender) {
         top: messagesContainer.scrollHeight,
         behavior: 'smooth'
     });
-}
 
+    saveChatHistory();
+}
 
 // =====================================
 // Typing Indicator
 // =====================================
-
 function createTypingIndicator() {
     const indicatorDiv = document.createElement('div');
     indicatorDiv.classList.add('message', 'bot-message');
@@ -203,77 +158,55 @@ function createTypingIndicator() {
 
     const typingBubble = document.createElement('div');
     typingBubble.classList.add('typing-indicator');
-
     for (let i = 0; i < 3; i++) {
         const dot = document.createElement('span');
         typingBubble.appendChild(dot);
     }
-
     indicatorDiv.appendChild(typingBubble);
-
     return indicatorDiv;
 }
-
 
 // =====================================
 // Send Message
 // =====================================
-
 async function sendMessage() {
     const text = userInput.value.trim();
-
     if (text === '' || sendBtn.disabled) return;
 
     addMessage(text, 'user');
-
     userInput.value = '';
     userInput.style.height = 'auto';
-
     sendBtn.disabled = true;
 
     const typingIndicator = createTypingIndicator();
     messagesContainer.appendChild(typingIndicator);
-
-    messagesContainer.scrollTo({
-        top: messagesContainer.scrollHeight,
-        behavior: 'smooth'
-    });
+    messagesContainer.scrollTo({ top: messagesContainer.scrollHeight, behavior: 'smooth' });
 
     try {
         const payload = {
             message: text,
             conversation_id: getConversationId(),
-
-            // جاهزة للتكامل مع NestJS لاحقاً
             patient_profile: null,
             medical_context: null
         };
 
         const response = await fetch('/chat', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
 
         const data = await response.json();
-
         document.getElementById('typing')?.remove();
-        
-        if (response.ok) {
 
+        if (response.ok) {
             if (data.status) {
                 updateControlVisuals(data.status);
             }
-        
-            setTimeout(() => {
-                addMessage(data.response, 'bot');
-            }, 300);
+            setTimeout(() => addMessage(data.response, 'bot'), 300);
         } else {
             addMessage('عذراً، حدث خطأ. حاول مرة أخرى.', 'bot');
-         }
-
+        }
     } catch (error) {
         document.getElementById('typing')?.remove();
         addMessage('تعذر الاتصال بالخادم.', 'bot');
@@ -283,44 +216,23 @@ async function sendMessage() {
     }
 }
 
-
 // =====================================
 // Keyboard Events
 // =====================================
-
 userInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-        if (e.shiftKey) {
-            return;
-        } else {
-            e.preventDefault();
-            sendMessage();
-        }
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
     }
 });
 
-
-// =====================================
-// Events
-// =====================================
-
 sendBtn.addEventListener('click', sendMessage);
 
-
 // =====================================
-// Initial Focus
+// LocalStorage: Chat History
 // =====================================
-
-userInput.focus();
-
-
-// =====================================
-// حفظ واستعادة المحادثات (LocalStorage)
-// =====================================
-
 const STORAGE_KEY = 'chat_history';
 
-// حفظ المحادثة الحالية
 function saveChatHistory() {
     const messages = [];
     document.querySelectorAll('.message').forEach(msgDiv => {
@@ -336,44 +248,108 @@ function saveChatHistory() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
 }
 
-// تحميل المحادثة المحفوظة
 function loadChatHistory() {
+    // إزالة جميع الرسائل الحالية
+    while (messagesContainer.firstChild) {
+        messagesContainer.removeChild(messagesContainer.firstChild);
+    }
+
+    // إعادة إضافة الرسالة الترحيبية الافتراضية
+    const welcomeDiv = document.createElement('div');
+    welcomeDiv.classList.add('message', 'bot-message');
+    const welcomeBubble = document.createElement('div');
+    welcomeBubble.classList.add('bubble');
+    welcomeBubble.innerText = 'مرحباً! كيف يمكنني مساعدتك اليوم؟';
+    welcomeDiv.appendChild(welcomeBubble);
+    messagesContainer.appendChild(welcomeDiv);
+
+    // تحميل المحادثة المحفوظة (إن وجدت)
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
         try {
             const messages = JSON.parse(saved);
-            // تفريغ المحادثة الحالية (عدا الرسالة الترحيبية الأولى)
-            const existingMessages = document.querySelectorAll('.message');
-            for (let i = 1; i < existingMessages.length; i++) {
-                existingMessages[i].remove();
-            }
-            // إضافة الرسائل المحفوظة
-            messages.forEach(msg => {
-                addMessage(msg.text, msg.sender);
-            });
+            // تجاهل الرسالة الترحيبية المحفوظة إذا كانت مطابقة للافتراضية
+            const filtered = messages.filter(msg => msg.text !== 'مرحباً! كيف يمكنني مساعدتك اليوم؟');
+            filtered.forEach(msg => addMessage(msg.text, msg.sender));
         } catch (e) {
             console.error("Failed to load chat history:", e);
         }
     }
+
+    // استعادة حالة لوحة التحكم
+    const savedState = localStorage.getItem('last_dashboard_state');
+    if (savedState) {
+        try {
+            const state = JSON.parse(savedState);
+            updateControlVisuals({ sentiment_score: state.pv, error_level: state.error });
+        } catch (e) {}
+    }
+
+    saveChatHistory(); // مزامنة
 }
 
-// مسح المحادثة المحفوظة (اختياري)
 function clearChatHistory() {
     localStorage.removeItem(STORAGE_KEY);
+    // إعادة تعيين الواجهة: الاحتفاظ بالترحيب فقط
+    while (messagesContainer.firstChild) {
+        messagesContainer.removeChild(messagesContainer.firstChild);
+    }
+    const welcomeDiv = document.createElement('div');
+    welcomeDiv.classList.add('message', 'bot-message');
+    const welcomeBubble = document.createElement('div');
+    welcomeBubble.classList.add('bubble');
+    welcomeBubble.innerText = 'مرحباً! كيف يمكنني مساعدتك اليوم؟';
+    welcomeDiv.appendChild(welcomeBubble);
+    messagesContainer.appendChild(welcomeDiv);
+    saveChatHistory();
 }
 
-// استدعاء الحفظ بعد كل رسالة جديدة
-const originalAddMessage = addMessage;
-addMessage = function(text, sender) {
-    originalAddMessage.call(this, text, sender);
-    saveChatHistory();
-};
+// =====================================
+// إضافة زر إعادة الضبط (Reset) بشكل ديناميكي
+// =====================================
+function addControlButtons() {
+    const container = document.querySelector('.container');
+    const btnContainer = document.createElement('div');
+    btnContainer.className = 'control-buttons';
+    btnContainer.innerHTML = `
+        <button id="reset-chat" class="icon-btn" title="مسح المحادثة">🗑️</button>
+        <button id="reset-system" class="icon-btn" title="إعادة ضبط النظام">🔄</button>
+    `;
+    container.appendChild(btnContainer);
 
-// تحميل المحادثة عند بدء التشغيل
+    document.getElementById('reset-chat').addEventListener('click', () => {
+        if (confirm('هل تريد مسح سجل المحادثة؟')) {
+            clearChatHistory();
+        }
+    });
+
+    document.getElementById('reset-system').addEventListener('click', () => {
+        // إعادة ضبط قيم لوحة التحكم إلى الوضع الافتراضي
+        updateControlVisuals({ sentiment_score: 1.0, error_level: 0.0 });
+        localStorage.removeItem('last_dashboard_state');
+        // لا نمسح المحادثة، فقط نعيد المؤشرات
+    });
+}
+
+// =====================================
+// إضافة تلميحات توضيحية للوحة التحكم (Tooltips)
+// =====================================
+function addDashboardTooltips() {
+    const pvLabel = document.querySelector('.metric:first-child .metric-label');
+    const errorLabel = document.querySelector('.metric:nth-child(2) .metric-label');
+    const statusIndicator = document.querySelector('.status-indicator');
+
+    pvLabel.setAttribute('title', 'Process Variable: مستوى الهدوء الحالي بعد المعالجة الرقمية');
+    errorLabel.setAttribute('title', 'Error = Setpoint - PV: مقدار الانحراف عن الهدف (1.0)');
+    statusIndicator.setAttribute('title', 'حالة النظام: مستقر (خطأ منخفض) / انتباه / خطر');
+}
+
+// =====================================
+// بدء التشغيل
+// =====================================
 window.addEventListener('DOMContentLoaded', () => {
     loadChatHistory();
+    addControlButtons();
+    addDashboardTooltips();
+    userInput.focus();
 });
-
-// اختياري: إضافة زر لمسح المحادثة (يمكن إضافته في HTML)
-// <button id="clear-chat" style="position:fixed; bottom:20px; right:20px;">مسح المحادثة</button>
-// ثم ربطه بـ clearChatHistory وإعادة تحميل الصفحة
