@@ -77,29 +77,89 @@ function formatMessageText(text) {
 }
 
 
+// ====================== إضافة المتغيرات العامة في بداية الملف ======================
+let displayPV = 1.0;        // القيمة المعروضة حالياً للـ PV (بعد التنعيم)
+let displayError = 0.0;     // القيمة المعروضة حالياً للـ Error (بعد التنعيم)
+let targetPV = 1.0;         // القيمة الهدف القادمة من السيرفر
+let targetError = 0.0;      // قيمة الخطأ القادمة من السيرفر
+let animFrame = null;       // مؤشر إطار الرسوم المتحركة
+const ALPHA = 0.12;         // معامل التنعيم (كلما قل كان التنعيم أبطأ وأكثر سلاسة)
+
+// =====================================
+// دالة التنعيم والرسوم المتحركة (EMA + RAF)
+// =====================================
+function smoothUpdate(newPV, newError) {
+    // تحديث القيم الهدف
+    targetPV = newPV;
+    targetError = newError;
+
+    // إذا لم تكن هناك حركة متحركة نشطة، ابدأ واحدة
+    if (!animFrame) {
+        animFrame = requestAnimationFrame(updateCounters);
+    }
+}
+
+function updateCounters() {
+    // تطبيق Exponential Moving Average
+    displayPV = displayPV + ALPHA * (targetPV - displayPV);
+    displayError = displayError + ALPHA * (targetError - displayError);
+
+    // تحديث عناصر HTML بالقيم الجديدة (بتنسيق رقمي)
+    pvElement.textContent = displayPV.toFixed(3);
+    errorElement.textContent = displayError.toFixed(3);
+
+    // ===== تطبيق الألوان المتدرجة (Gradient) =====
+    // تحويل قيمة الخطأ (0.0 إلى 1.0) إلى درجة لون من الأخضر (120) إلى الأحمر (0)
+    // نربط الخطأ بـ HSL: Hue = 120 * (1 - min(error, 1.0))
+    const errorClamped = Math.min(displayError, 1.0);
+    const hue = 120 * (1 - errorClamped); // 120 = أخضر، 0 = أحمر
+    const saturation = 85;
+    const lightness = 55;
+
+    // تطبيق اللون على النقطة والنص
+    const color = `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+    statusDot.style.backgroundColor = color;
+    statusDot.style.boxShadow = `0 0 15px ${color}`;
+
+    // تغيير نص الحالة بناءً على الخطأ
+    if (displayError > 0.55) {
+        statusText.textContent = 'خطر';
+        dashboard.classList.add('disturbance');
+    } else if (displayError > 0.25) {
+        statusText.textContent = 'انتباه';
+        dashboard.classList.remove('disturbance');
+    } else {
+        statusText.textContent = 'مستقر';
+        dashboard.classList.remove('disturbance');
+    }
+
+    // التحقق من الوصول إلى الهدف (بفارق بسيط) لإنهاء الأنيميشن
+    const diffPV = Math.abs(targetPV - displayPV);
+    const diffErr = Math.abs(targetError - displayError);
+
+    if (diffPV > 0.001 || diffErr > 0.001) {
+        // استمرار الحركة
+        animFrame = requestAnimationFrame(updateCounters);
+    } else {
+        // إنهاء الحركة
+        animFrame = null;
+        // ضبط القيمة النهائية بدقة
+        pvElement.textContent = targetPV.toFixed(3);
+        errorElement.textContent = targetError.toFixed(3);
+    }
+}
+
+// =====================================
+// تعديل دالة updateControlVisuals لاستدعاء نظام التنعيم
+// =====================================
 function updateControlVisuals(status) {
     if (!status) return;
 
     const sentiment = status.sentiment_score ?? 1.0;
     const error = status.error_level ?? 0.0;
 
-
-    pvElement.textContent = sentiment.toFixed(2);
-    errorElement.textContent = error.toFixed(2);
-
-
-    const isDisturbance = error > 0.4;
-
-    if (isDisturbance) {
-        statusDot.classList.add('error');
-        statusText.textContent = 'اضطراب';
-        dashboard.classList.add('disturbance');
-    } else {
-        statusDot.classList.remove('error');
-        statusText.textContent = 'مستقر';
-        dashboard.classList.remove('disturbance');
-    }
-
+    // بدلاً من التحديث المباشر، نرسل القيم إلى نظام التنعيم
+    smoothUpdate(sentiment, error);
 }
 
 
