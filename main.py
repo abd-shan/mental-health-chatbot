@@ -48,6 +48,7 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     response: str
+    status: Optional[Any] = None
 
 # ===============================
 # Session Manager
@@ -69,22 +70,26 @@ async def read_root(request: Request):
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest):
-
     conversation_id = req.conversation_id or str(uuid.uuid4())
-
     controller = get_or_create_session(conversation_id)
 
     try:
-        response_text = controller.chat(
+        result = controller.chat(
             user_input=req.message,
             patient_profile=req.patient_profile,
             medical_context=req.medical_context
         )
+        
+        logger.info(f"Control Metrics: {result.get('status')}")
+        
+        return ChatResponse(
+            response=result["response"], 
+            status=result.get("status")
+        )
+        
     except Exception:
         logger.exception("Chat failed")
-        raise HTTPException(status_code=500, detail="خطأ مؤقت")
-
-    return ChatResponse(response=response_text)
+        raise HTTPException(status_code=500, detail="خطأ في نظام التحكم")
 
 # ===============================
 # Local Run
