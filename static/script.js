@@ -312,3 +312,68 @@ sendBtn.addEventListener('click', sendMessage);
 // =====================================
 
 userInput.focus();
+
+
+// =====================================
+// حفظ واستعادة المحادثات (LocalStorage)
+// =====================================
+
+const STORAGE_KEY = 'chat_history';
+
+// حفظ المحادثة الحالية
+function saveChatHistory() {
+    const messages = [];
+    document.querySelectorAll('.message').forEach(msgDiv => {
+        const isUser = msgDiv.classList.contains('user-message');
+        const bubble = msgDiv.querySelector('.bubble');
+        if (bubble) {
+            messages.push({
+                text: bubble.innerText,
+                sender: isUser ? 'user' : 'bot'
+            });
+        }
+    });
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(messages));
+}
+
+// تحميل المحادثة المحفوظة
+function loadChatHistory() {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+        try {
+            const messages = JSON.parse(saved);
+            // تفريغ المحادثة الحالية (عدا الرسالة الترحيبية الأولى)
+            const existingMessages = document.querySelectorAll('.message');
+            for (let i = 1; i < existingMessages.length; i++) {
+                existingMessages[i].remove();
+            }
+            // إضافة الرسائل المحفوظة
+            messages.forEach(msg => {
+                addMessage(msg.text, msg.sender);
+            });
+        } catch (e) {
+            console.error("Failed to load chat history:", e);
+        }
+    }
+}
+
+// مسح المحادثة المحفوظة (اختياري)
+function clearChatHistory() {
+    localStorage.removeItem(STORAGE_KEY);
+}
+
+// استدعاء الحفظ بعد كل رسالة جديدة
+const originalAddMessage = addMessage;
+addMessage = function(text, sender) {
+    originalAddMessage.call(this, text, sender);
+    saveChatHistory();
+};
+
+// تحميل المحادثة عند بدء التشغيل
+window.addEventListener('DOMContentLoaded', () => {
+    loadChatHistory();
+});
+
+// اختياري: إضافة زر لمسح المحادثة (يمكن إضافته في HTML)
+// <button id="clear-chat" style="position:fixed; bottom:20px; right:20px;">مسح المحادثة</button>
+// ثم ربطه بـ clearChatHistory وإعادة تحميل الصفحة
