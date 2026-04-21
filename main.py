@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pathlib import Path
 from dotenv import load_dotenv
-from typing import Optional
+from typing import Optional , Any
 import uuid
 import logging
 
