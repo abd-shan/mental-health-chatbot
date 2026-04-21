@@ -5,11 +5,13 @@ import string
 from datetime import datetime, timedelta
 from typing import List, Optional
 import logging
+import time
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage
 from langchain_core.tools import tool
-from langchain.agents import create_agent
+# Agent معطّل حالياً - نستخدم الاستدعاء المباشر
+# from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
 
 # ==============================
@@ -30,7 +32,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================
-# Tools
+# Tools (محتفظة بها للاستخدام المستقبلي)
 # ==============================
 
 @tool
@@ -70,7 +72,7 @@ tools = [generate_session_id, breathing_exercise, schedule_session]
 # ==============================
 
 llm = ChatOpenAI(
-    model="deepseek/deepseek-chat",
+    model="deepseek/deepseek-chat",  # يمكن تغييره إلى "google/gemini-flash-1.5" إن كان مجانياً
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY,
     temperature=0.3,
@@ -135,16 +137,6 @@ def build_dynamic_context(patient_profile=None, medical_context=None):
 """
 
 # ==============================
-# Agent
-# ==============================
-
-agent_executor = create_agent(
-    model=llm,
-    tools=tools,
-    system_prompt=BASE_SYSTEM_PROMPT,
-)
-
-# ==============================
 # Intent Detection
 # ==============================
 
@@ -163,9 +155,8 @@ def detect_intent(text: str) -> str:
     return "casual"
 
 # ==============================
-# Controller
+# Controller (PID + Low-pass Filter)
 # ==============================
-
 
 class ConversationController:
     def __init__(self):
@@ -177,15 +168,14 @@ class ConversationController:
         self.prev_error = 0.0
         self.integral = 0.0
         self.filtered_sentiment = 1.0  # قيمة PV بعد المرشح الرقمي
-        self.last_output = 0.0
         
-        # معاملات التحكم PID (قابلة للضبط)
-        self.Kp = 1.2   # Proportional Gain
-        self.Ki = 0.3   # Integral Gain
-        self.Kd = 0.5   # Derivative Gain
-        self.dt = 1.0   # فترة العينة (افتراضية 1 لأن كل رسالة هي خطوة)
+        # معاملات التحكم PID
+        self.Kp = 1.2
+        self.Ki = 0.3
+        self.Kd = 0.5
+        self.dt = 1.0
         
-        # معامل المرشح الرقمي (Low-pass Filter) لتنعيم PV
+        # معامل المرشح الرقمي (Low-pass Filter)
         self.ALPHA_FILTER = 0.2
 
     def _monitor_sentiment(self, text: str) -> float:
@@ -210,86 +200,100 @@ class ConversationController:
 
     def _pid_control(self, error: float) -> float:
         """حساب إشارة التحكم (Control Signal) باستخدام PID"""
-        # التناسبي (Proportional)
         P = self.Kp * error
         
-        # التراكمي (Integral) مع مقاومة التشبع (Anti-windup)
         self.integral += error * self.dt
-        # تحديد حدود التراكم لتجنب التشبع
-        self.integral = max(-2.0, min(self.integral, 2.0))
+        self.integral = max(-2.0, min(self.integral, 2.0))  # Anti-windup
         I = self.Ki * self.integral
         
-        # التفاضلي (Derivative)
         derivative = (error - self.prev_error) / self.dt
         D = self.Kd * derivative
         
-        # حفظ الخطأ السابق
         self.prev_error = error
-        
-        # إشارة التحكم النهائية
         control_signal = P + I + D
         return control_signal
 
+    def _generate_fallback_response(self, user_input: str, sentiment: float, error: float) -> str:
+        """وضع المحاكاة: ردود مبنية على منطق التحكم فقط (في حال تعذر الاتصال بـ LLM)."""
+        if error > 0.35:
+            return "أشعر أنك تمر بوقت صعب جداً الآن. أنا هنا معك. دعنا نأخذ لحظة للتنفس: خذ شهيقاً عميقاً... احبسه قليلاً... والآن أخرج الزفير ببطء. أنا أسمعك."
+        elif error > 0.15:
+            return "يبدو أن هناك شيئاً يزعجك. أود أن أفهم أكثر. هل يمكنك أن تخبرني ما الذي يدور في بالك الآن؟"
+        else:
+            return "شكراً لمشاركتك. أنا هنا لدعمك. كيف يمكنني مساعدتك اليوم؟"
+
+    def _verify_output(self, ai_response: str) -> bool:
+        """التحقق من سلامة الرد"""
+        if not ai_response or len(ai_response.strip()) < 2:
+            return False
+        forbidden_patterns = ["أشخص حالتك بـ", "مرضك هو", "انتحار", "أذى"]
+        return not any(pattern in ai_response for pattern in forbidden_patterns)
+
     def chat(self, user_input: str, patient_profile: Optional[dict] = None, medical_context: Optional[dict] = None) -> dict:
-        # 1. القياس الخام (Raw Measurement)
+        # 1. القياس الخام
         raw_sentiment = self._monitor_sentiment(user_input)
         
-        # 2. تطبيق المرشح الرقمي للحصول على PV الحقيقي (مستقر)
+        # 2. تطبيق المرشح الرقمي (PV)
         current_sentiment = self._apply_low_pass_filter(raw_sentiment)
         
-        # 3. حساب الخطأ (Error = SP - PV)
+        # 3. حساب الخطأ
         error = self.target_sentiment - current_sentiment
         
-        # 4. حساب إشارة التحكم PID
+        # 4. إشارة PID
         control_signal = self._pid_control(error)
         
-        # 5. بناء تعليمات التحكم بناءً على إشارة PID
+        # 5. تعليمات التحكم
         control_instruction = ""
         if error > 0.35:
-            control_instruction = "\n[تحكم PID]: حالة توتر عالية. استخدم تقنيات التنفس والتهدئة الفورية."
+            control_instruction = "\n[تحكم PID]: حالة توتر عالية جداً. استخدم تمارين تنفس فورية وكن داعماً بقوة."
         elif error > 0.15:
-            control_instruction = "\n[تحكم PID]: توتر متوسط. حافظ على نبرة داعمة وقدم تمارين بسيطة."
+            control_instruction = "\n[تحكم PID]: توتر ملحوظ. استخدم أسلوباً لطيفاً واطرح أسئلة مفتوحة للتفريغ."
         else:
-            control_instruction = "\n[تحكم PID]: حالة مستقرة. قدم استشارات عادية."
+            control_instruction = "\n[تحكم PID]: الحالة مستقرة. قدم دعماً روتينياً أو استفسر عن الاحتياجات."
 
-        # يمكن إضافة تأثير control_signal على اختيار نوع الرد أو على معامل temperature
-        # مثلاً: إذا كان control_signal كبيراً نزيد من التركيز على التعاطف.
-        
-        # 6. بناء السياق وإرسال الطلب للنموذج اللغوي
+        # 6. بناء السياق
         dynamic_context = build_dynamic_context(patient_profile, medical_context)
         self.messages.append(HumanMessage(content=user_input))
 
-        active_prompt = [
-            self.messages[0], 
-            SystemMessage(content=dynamic_context + control_instruction)
-        ] + self.messages[-10:]
+        system_content = dynamic_context + control_instruction
+        active_prompt = [SystemMessage(content=system_content)] + self.messages[-10:]
 
         intent = detect_intent(user_input)
-        try:
-            if intent in ["support", "booking"]:
-                result = agent_executor.invoke({"messages": active_prompt})
-                ai_content = result["messages"][-1].content
-            else:
+        ai_content = ""
+        
+        # 7. استدعاء LLM مع إعادة المحاولة
+        max_retries = 2
+        llm_success = False
+        for attempt in range(max_retries):
+            try:
                 response = llm.invoke(active_prompt)
                 ai_content = response.content
-            
-            if not self._verify_output(ai_content):
-                ai_content = "أنا هنا لأسمعك وأدعمك، ولكن يرجى العلم أنني لا أستطيع تقديم تشخيصات طبية. كيف يمكننا التركيز على شعورك الآن؟"
+                llm_success = True
+                logger.info(f"LLM responded successfully on attempt {attempt+1}")
+                break
+            except Exception as e:
+                logger.error(f"LLM call failed (attempt {attempt+1}/{max_retries}): {str(e)}")
+                if attempt == max_retries - 1:
+                    logger.warning("Switching to fallback response based on PID state.")
+                    ai_content = self._generate_fallback_response(user_input, current_sentiment, error)
+                else:
+                    time.sleep(0.8)
 
-        except Exception as e:
-            logger.error(f"Control Loop Error: {e}")
-            ai_content = "عذراً، أحتاج لحظة لمعالجة الطلب."
+        # 8. التحقق من المخرجات
+        if llm_success and not self._verify_output(ai_content):
+            ai_content = "أنا هنا لأسمعك وأدعمك، ولكن يرجى العلم أنني لا أستطيع تقديم تشخيصات طبية. كيف يمكننا التركيز على شعورك الآن؟"
 
+        # 9. تخزين الرد في الذاكرة
         self.messages.append(AIMessage(content=ai_content))
         self.messages = [self.messages[0]] + self.messages[-12:]
 
-        # 7. إرجاع البيانات مع قيم حقيقية بعد المعالجة
+        # 10. إرجاع النتيجة
         return {
             "response": ai_content,
             "status": {
-                "sentiment_score": round(current_sentiment, 3),      # PV بعد المرشح
-                "error_level": round(error, 3),                      # الخطأ الحقيقي
-                "control_signal": round(control_signal, 3),          # إشارة PID
+                "sentiment_score": round(current_sentiment, 3),
+                "error_level": round(error, 3),
+                "control_signal": round(control_signal, 3),
                 "intent": intent
             }
         }
