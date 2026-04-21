@@ -3,6 +3,11 @@ const userInput = document.getElementById('user-input');
 const sendBtn = document.getElementById('send-btn');
 const featureBtn = document.getElementById('feature-btn');
 const featurePanel = document.getElementById('feature-panel');
+const pvElement = document.getElementById('pv-value');
+const errorElement = document.getElementById('error-value');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const dashboard = document.getElementById('control-dashboard');
 
 
 // =====================================
@@ -70,6 +75,33 @@ function formatMessageText(text) {
 
     return paragraphs.map(p => `<p>${p}</p>`).join('');
 }
+
+
+function updateControlVisuals(status) {
+    if (!status) return;
+
+    const sentiment = status.sentiment_score ?? 1.0;
+    const error = status.error_level ?? 0.0;
+
+
+    pvElement.textContent = sentiment.toFixed(2);
+    errorElement.textContent = error.toFixed(2);
+
+
+    const isDisturbance = error > 0.4;
+
+    if (isDisturbance) {
+        statusDot.classList.add('error');
+        statusText.textContent = 'اضطراب';
+        dashboard.classList.add('disturbance');
+    } else {
+        statusDot.classList.remove('error');
+        statusText.textContent = 'مستقر';
+        dashboard.classList.remove('disturbance');
+    }
+
+}
+
 
 
 // =====================================
