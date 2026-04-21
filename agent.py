@@ -167,49 +167,81 @@ def detect_intent(text: str) -> str:
 # ==============================
 
 class ConversationController:
-
     def __init__(self):
         self.messages: List[BaseMessage] = []
         self.messages.append(SystemMessage(content=BASE_SYSTEM_PROMPT))
+        # هدف النظام (Setpoint): الهدوء النفسي الرقمي
+        self.target_sentiment = 1.0 
 
-    def _call_llm(self, messages: List[BaseMessage]) -> str:
-        try:
-            response = llm.invoke(messages)
-            return response.content
-        except Exception:
-            logger.exception("LLM failed")
-            return "حدث خطأ مؤقت."
+    def _monitor_sentiment(self, text: str) -> float:
+        """
+        Sensor: مستشعر لتحويل النص إلى قيمة عددية (Sentiment Score).
+        هنا نمثل الـ Process Variable (PV).
+        """
+        negative_indicators = ["حزين", "قلق", "متوتر", "ضيق", "خائف", "تعبان"]
+        score = 1.0
+        for word in negative_indicators:
+            if word in text:
+                score -= 0.2
+        return max(score, 0.0)
 
-    def chat(
-        self,
-        user_input: str,
-        patient_profile: Optional[dict] = None,
-        medical_context: Optional[dict] = None
-    ) -> str:
+    def _verify_output(self, ai_response: str) -> bool:
+        """
+        Feedback Loop: مراجعة المخرجات قبل إرسالها (Guardrail).
+        التأكد من أن الرد لا يحتوي على تشخيص طبي أو تحريض.
+        """
+        forbidden_patterns = ["أشخص حالتك بـ", "مرضك هو", "انتحار", "أذى"]
+        return not any(pattern in ai_response for pattern in forbidden_patterns)
 
-        dynamic_context = build_dynamic_context(patient_profile, medical_context)
+    def chat(self, user_input: str, patient_profile: Optional[dict] = None) -> dict:
+        # 1. Measurement (Sensor)
+        current_sentiment = self._monitor_sentiment(user_input)
+        
+        # 2. Comparison (Error Calculation)
+        error = self.target_sentiment - current_sentiment
+        
+        # 3. Decision Logic (Controller)
+ 
+        control_instruction = ""
+        if error > 0.4:
+            control_instruction = "\nتنبيه للنظام: المستخدم يمر بحالة توتر عالية. ركز على تقنيات التنفس والهدوء فوراً."
 
+        dynamic_context = build_dynamic_context(patient_profile)
         self.messages.append(HumanMessage(content=user_input))
 
-        temp_messages = self.messages + [
-            SystemMessage(content=dynamic_context)
-        ]
+        active_prompt = [
+            self.messages[0], 
+            SystemMessage(content=dynamic_context + control_instruction)
+        ] + self.messages[-10:]
 
+        # 4. Action (Actuator)
         intent = detect_intent(user_input)
-
-        if intent in ["education", "casual"]:
-            ai_content = self._call_llm(temp_messages)
-
-        else:
-            try:
-                result = agent_executor.invoke({"messages": temp_messages})
+        try:
+            if intent in ["support", "booking"]:
+                result = agent_executor.invoke({"messages": active_prompt})
                 ai_content = result["messages"][-1].content
-            except Exception:
-                logger.exception("Agent failed")
-                ai_content = "حدث خطأ مؤقت."
+            else:
+                response = llm.invoke(active_prompt)
+                ai_content = response.content
+            
+            # 5. Output Verification (Feedback)
+            if not self._verify_output(ai_content):
+                ai_content = "أنا هنا لأسمعك وأدعمك، ولكن يرجى العلم أنني لا أستطيع تقديم تشخيصات طبية. كيف يمكننا التركيز على شعورك الآن؟"
+
+        except Exception as e:
+            logger.error(f"Control Loop Error: {e}")
+            ai_content = "عذراً، أحتاج لحظة لمعالجة الطلب."
 
         self.messages.append(AIMessage(content=ai_content))
-
+        
+        # Stability Control: الحفاظ على استقرار الذاكرة (Memory Buffer)
         self.messages = [self.messages[0]] + self.messages[-12:]
 
-        return ai_content
+        return {
+            "response": ai_content,
+            "status": {
+                "sentiment_score": current_sentiment,
+                "error_level": round(error, 2),
+                "intent": intent
+            }
+        }
