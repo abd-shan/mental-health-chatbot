@@ -621,3 +621,41 @@ header p {
 .control-dashboard.disturbance {
     animation: alertBlink 1.2s infinite;
 }
+
+
+
+/* أزرار التحكم الإضافية */
+.control-buttons {
+    position: absolute;
+    bottom: 20px;
+    left: 20px;
+    display: flex;
+    gap: 10px;
+    z-index: 10;
+}
+
+.icon-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: #1e6f9c;
+    color: white;
+    border: none;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    font-size: 1.3rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+}
+
+.icon-btn:hover {
+    background: #145a80;
+    transform: scale(1.1);
+}
+
+/* تحسين مظهر التلميحات */
+[title] {
+    cursor: help;
+}
