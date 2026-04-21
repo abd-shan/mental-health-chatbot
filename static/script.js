@@ -200,14 +200,19 @@ async function sendMessage() {
         const data = await response.json();
 
         document.getElementById('typing')?.remove();
-
+        
         if (response.ok) {
+
+            if (data.status) {
+                updateControlVisuals(data.status);
+            }
+        
             setTimeout(() => {
                 addMessage(data.response, 'bot');
             }, 300);
         } else {
             addMessage('عذراً، حدث خطأ. حاول مرة أخرى.', 'bot');
-        }
+         }
 
     } catch (error) {
         document.getElementById('typing')?.remove();
