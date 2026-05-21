@@ -17,9 +17,10 @@ load_dotenv()
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Mental Health Chatbot")
+app1 = FastAPI(title="Mental Health Chatbot")
 
-app.add_middleware(
+
+app1.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
@@ -29,7 +30,7 @@ app.add_middleware(
 
 BASE_DIR = Path(__file__).resolve().parent
 
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app1.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -63,12 +64,12 @@ def get_or_create_session(session_id: str):
 # Routes
 # ===============================
 
-@app.get("/", response_class=HTMLResponse)
+@app1.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
 
-@app.post("/chat", response_model=ChatResponse)
+@app1.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest):
     conversation_id = req.conversation_id or str(uuid.uuid4())
     controller = get_or_create_session(conversation_id)
@@ -97,4 +98,5 @@ async def chat_endpoint(req: ChatRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app1, host="0.0.0.0", port=8000)
+    uvicorn.run()
