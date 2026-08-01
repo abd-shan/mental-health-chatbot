@@ -1,18 +1,16 @@
 import os
-import json
-import random
-import string
-from datetime import datetime, timedelta
-from typing import List, Optional
+from typing import Any, List, Mapping, Optional, Sequence
 import logging
+import threading
 import time
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage, SystemMessage
-from langchain_core.tools import tool
-# Agent معطّل حالياً - نستخدم الاستدعاء المباشر
-# from langchain.agents import create_agent
 from langchain_openai import ChatOpenAI
+
+from catalog import platform_catalog
+from prompting import TurnPlan, build_pre_query, infer_turn_plan
+from summarization import SUMMARY_SYSTEM_PROMPT, build_summary_payload
 
 # ==============================
 # Environment
@@ -21,8 +19,11 @@ from langchain_openai import ChatOpenAI
 load_dotenv()
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-if not OPENROUTER_API_KEY:
-    raise RuntimeError("OPENROUTER_API_KEY is not set")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat")
+OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_SITE_URL = os.getenv("OPENROUTER_SITE_URL")
+OPENROUTER_APP_NAME = os.getenv("OPENROUTER_APP_NAME", "Aoun Mental Health Chatbot")
+OPENROUTER_SUMMARY_MODEL = os.getenv("OPENROUTER_SUMMARY_MODEL", OPENROUTER_MODEL)
 
 # ==============================
 # Logging
@@ -32,127 +33,102 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ==============================
-# Tools (محتفظة بها للاستخدام المستقبلي)
-# ==============================
-
-@tool
-def generate_session_id() -> str:
-    """Generate secure session ID."""
-    chars = string.ascii_letters + string.digits
-    return "".join(random.choice(chars) for _ in range(24))
-
-
-@tool
-def breathing_exercise() -> str:
-    """Guide user through a short breathing exercise."""
-    return (
-        "لنأخذ لحظة هدوء.\n"
-        "1. خذ نفساً عميقاً لمدة 4 ثوانٍ.\n"
-        "2. احبس النفس 4 ثوانٍ.\n"
-        "3. ازفر ببطء لمدة 6 ثوانٍ.\n"
-        "كرر ذلك 4 مرات."
-    )
-
-
-@tool
-def schedule_session(name: str, days_from_now: int = 1) -> str:
-    """Simulate scheduling a therapy session."""
-    date = datetime.utcnow() + timedelta(days=days_from_now)
-    booking = {
-        "client": name,
-        "scheduled_at": date.isoformat(),
-        "status": "confirmed"
-    }
-    return json.dumps(booking, ensure_ascii=False)
-
-tools = [generate_session_id, breathing_exercise, schedule_session]
-
-# ==============================
 # LLM
 # ==============================
 
-llm = ChatOpenAI(
-    model="deepseek/deepseek-chat",  # يمكن تغييره إلى "google/gemini-flash-1.5" إن كان مجانياً
-    base_url="https://openrouter.ai/api/v1",
-    api_key=OPENROUTER_API_KEY,
-    temperature=0.3,
+def create_llm(model: str, temperature: float) -> Optional[ChatOpenAI]:
+    """Create the OpenRouter-backed LangChain client when configured."""
+    if not OPENROUTER_API_KEY:
+        logger.warning("OPENROUTER_API_KEY is not set; fallback responses are enabled")
+        return None
+
+    headers = {"X-Title": OPENROUTER_APP_NAME}
+    if OPENROUTER_SITE_URL:
+        headers["HTTP-Referer"] = OPENROUTER_SITE_URL
+
+    return ChatOpenAI(
+        model=model,
+        base_url=OPENROUTER_BASE_URL,
+        api_key=OPENROUTER_API_KEY,
+        temperature=temperature,
+        timeout=30,
+        max_retries=1,
+        default_headers=headers,
+    )
+
+
+llm = create_llm(OPENROUTER_MODEL, temperature=0.3)
+summary_llm = (
+    llm
+    if OPENROUTER_SUMMARY_MODEL == OPENROUTER_MODEL
+    else create_llm(OPENROUTER_SUMMARY_MODEL, temperature=0.1)
 )
 
-# ==============================
-# Base Prompt
-# ==============================
 
-BASE_SYSTEM_PROMPT = """
-أنت مساعد متخصص في الدعم النفسي ضمن منصة عون.
+def summarize_conversation(
+    existing_summary: Optional[str],
+    messages: Sequence[Mapping[str, Any]],
+) -> str:
+    """Create a durable summary that the main backend can persist."""
+    if not summary_llm:
+        raise RuntimeError("OpenRouter is not configured")
 
-الهوية:
-- التطبيق من تطوير فريق منصة عون.
-- المطور التقني: المهندس عبدالقادر الشنبور.
+    response = summary_llm.invoke(
+        [
+            SystemMessage(content=SUMMARY_SYSTEM_PROMPT),
+            HumanMessage(content=build_summary_payload(existing_summary, messages)),
+        ]
+    )
+    content = response.content
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError("The summary model returned an empty response")
+    summary = content.strip()
+    if len(summary) > 6000:
+        raise RuntimeError("The summary model exceeded the output limit")
+    return summary
 
-المبادئ:
-- قدم دعماً نفسياً هادئاً.
-- لا تقدم تشخيصاً طبياً.
-- عزز القيم الأخلاقية.
-- لا تشجع السلوك الضار.
-- كن مختصراً وواضحاً.
-"""
+CRISIS_INDICATORS = (
+    "أريد أن أموت",
+    "اريد ان اموت",
+    "أفكر بالانتحار",
+    "افكر بالانتحار",
+    "سأنتحر",
+    "سانتحر",
+    "أؤذي نفسي",
+    "اؤذي نفسي",
+    "إيذاء نفسي",
+    "ايذاء نفسي",
+    "قتل نفسي",
+    "بقتل نفسي",
+    "أنهي حياتي",
+    "انهي حياتي",
+    "ما أبغى أعيش",
+    "ما ابغى اعيش",
+    "ما عاد أبغى أعيش",
+    "ما عاد ابغى اعيش",
+    "ودي أموت",
+    "ودي اموت",
+    "بنتحر",
+    "suicide",
+    "kill myself",
+    "hurt myself",
+    "self harm",
+)
 
-# ==============================
-# Dynamic Context Builder
-# ==============================
 
-def build_dynamic_context(patient_profile=None, medical_context=None):
+def detect_crisis(text: str) -> bool:
+    normalized = " ".join(text.lower().split())
+    return any(indicator in normalized for indicator in CRISIS_INDICATORS)
 
-    name = "غير معروف"
-    age = "غير متوفر"
-    gender = "غير محدد"
 
-    history = "لا توجد معلومات طبية متاحة"
-    last_visit = "غير معروفة"
-
-    if patient_profile:
-        name = patient_profile.get("name") or "غير معروف"
-        age = patient_profile.get("age") or "غير متوفر"
-        gender = patient_profile.get("gender") or "غير محدد"
-
-    if medical_context:
-        history = medical_context.get("history") or "لا توجد معلومات طبية متاحة"
-        last_visit = medical_context.get("last_visit") or "غير معروفة"
-
-    return f"""
-بيانات المستخدم:
-الاسم: {name}
-العمر: {age}
-الجنس: {gender}
-
-السجل الطبي:
-{history}
-
-آخر مراجعة:
-{last_visit}
-
-إذا كانت البيانات ناقصة:
-- تعامل بمرونة
-- لا تفترض معلومات غير موجودة
-"""
-
-# ==============================
-# Intent Detection
-# ==============================
-
-def detect_intent(text: str) -> str:
-    text = text.lower()
-
-    if any(word in text for word in ["اشرح", "ما هو", "تعريف"]):
-        return "education"
-
-    elif any(word in text for word in ["متوتر", "قلق", "حزين", "ضيق"]):
-        return "support"
-
-    elif any(word in text for word in ["احجز", "جلسة", "موعد"]):
-        return "booking"
-
-    return "casual"
+def crisis_response() -> str:
+    return (
+        "سلامتك أهم شيء الآن. إذا كنت على وشك إيذاء نفسك أو لديك وسيلة قريبة، "
+        "ابتعد عنها واتصل بخدمات الطوارئ المحلية فوراً أو توجّه إلى أقرب قسم طوارئ. "
+        "في السعودية يمكنك الاتصال بـ997 أو 999، وبـ911 حيث تكون الخدمة متاحة. "
+        "اطلب من شخص تثق به أن يبقى معك الآن، ولا تبقَ وحدك. "
+        "هل أنت في خطر فوري الآن، وهل يوجد شخص قريب يمكنه الوصول إليك؟"
+    )
 
 # ==============================
 # Controller (PID + Low-pass Filter)
@@ -160,8 +136,8 @@ def detect_intent(text: str) -> str:
 
 class ConversationController:
     def __init__(self):
+        self._lock = threading.Lock()
         self.messages: List[BaseMessage] = []
-        self.messages.append(SystemMessage(content=BASE_SYSTEM_PROMPT))
         self.target_sentiment = 1.0
         
         # === متغيرات PID والمرشحات ===
@@ -213,23 +189,101 @@ class ConversationController:
         control_signal = P + I + D
         return control_signal
 
-    def _generate_fallback_response(self, user_input: str, sentiment: float, error: float) -> str:
-        """وضع المحاكاة: ردود مبنية على منطق التحكم فقط (في حال تعذر الاتصال بـ LLM)."""
-        if error > 0.35:
+    def _generate_fallback_response(self, turn_plan: TurnPlan) -> str:
+        """Safe, intent-aware response when the LLM provider is unavailable."""
+        if turn_plan.response_mode == "booking_preparation":
+            return (
+                "أستطيع مساعدتك في الاستعداد للحجز، لكن لا يمكنني تأكيد موعد من "
+                "داخل المحادثة حالياً. هل تبحث عن أخصائي نفسي أم جلسة دعم عامة؟"
+            )
+        if turn_plan.response_mode == "safe_medication_boundary":
+            return (
+                "لا أستطيع تحديد دواء أو جرعة أو تغيير علاج. الأفضل توجيه هذا "
+                "السؤال إلى طبيبك أو صيدلي مؤهل، خصوصاً إذا كان مرتبطاً بوصفة حالية."
+            )
+        if turn_plan.response_mode == "psychoeducation":
+            return (
+                "تعذر الوصول إلى مصدر الإجابة الذكي حالياً، لذلك لا أريد تخمين "
+                "معلومة نفسية قد تكون غير دقيقة. يمكنك إعادة المحاولة بعد قليل."
+            )
+        if turn_plan.emotional_intensity == "high":
             return "أشعر أنك تمر بوقت صعب جداً الآن. أنا هنا معك. دعنا نأخذ لحظة للتنفس: خذ شهيقاً عميقاً... احبسه قليلاً... والآن أخرج الزفير ببطء. أنا أسمعك."
-        elif error > 0.15:
+        if turn_plan.emotional_intensity == "elevated":
             return "يبدو أن هناك شيئاً يزعجك. أود أن أفهم أكثر. هل يمكنك أن تخبرني ما الذي يدور في بالك الآن؟"
-        else:
-            return "شكراً لمشاركتك. أنا هنا لدعمك. كيف يمكنني مساعدتك اليوم؟"
+        return "شكراً لمشاركتك. أنا هنا لدعمك. كيف يمكنني مساعدتك اليوم؟"
 
     def _verify_output(self, ai_response: str) -> bool:
-        """التحقق من سلامة الرد"""
+        """Reject obvious diagnosis, medication, or fake-action claims."""
         if not ai_response or len(ai_response.strip()) < 2:
             return False
-        forbidden_patterns = ["أشخص حالتك بـ", "مرضك هو", "انتحار", "أذى"]
+        forbidden_patterns = [
+            "أشخص حالتك",
+            "مرضك هو",
+            "أنت مصاب بـ",
+            "أوقف دواءك",
+            "ابدأ بتناول",
+            "زد جرعتك",
+            "خفّض جرعتك",
+            "تم حجز موعدك",
+            "موعدك مؤكد",
+        ]
         return not any(pattern in ai_response for pattern in forbidden_patterns)
 
-    def chat(self, user_input: str, patient_profile: Optional[dict] = None, medical_context: Optional[dict] = None) -> dict:
+    @staticmethod
+    def _build_history(recent_messages: Optional[Sequence[Mapping[str, Any]]]) -> List[BaseMessage]:
+        history: List[BaseMessage] = []
+        for message in recent_messages or []:
+            role = message.get("role")
+            content = message.get("content")
+            if not isinstance(content, str) or not content.strip():
+                continue
+            if role == "user":
+                history.append(HumanMessage(content=content))
+            elif role == "assistant":
+                history.append(AIMessage(content=content))
+        return history[-10:]
+
+    def chat(
+        self,
+        user_input: str,
+        patient_profile: Optional[dict] = None,
+        medical_context: Optional[dict] = None,
+        conversation_summary: Optional[str] = None,
+        recent_messages: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> dict:
+        with self._lock:
+            return self._chat(
+                user_input,
+                patient_profile,
+                medical_context,
+                conversation_summary,
+                recent_messages,
+            )
+
+    def _chat(
+        self,
+        user_input: str,
+        patient_profile: Optional[dict] = None,
+        medical_context: Optional[dict] = None,
+        conversation_summary: Optional[str] = None,
+        recent_messages: Optional[Sequence[Mapping[str, Any]]] = None,
+    ) -> dict:
+        if detect_crisis(user_input):
+            response = crisis_response()
+            self.messages.append(HumanMessage(content=user_input))
+            self.messages.append(AIMessage(content=response))
+            self.messages = self.messages[-12:]
+            return {
+                "response": response,
+                "status": {
+                    "sentiment_score": 0.0,
+                    "error_level": 1.0,
+                    "control_signal": 1.0,
+                    "intent": "crisis",
+                    "risk_level": "urgent",
+                },
+            }
+
         # 1. القياس الخام
         raw_sentiment = self._monitor_sentiment(user_input)
         
@@ -242,27 +296,31 @@ class ConversationController:
         # 4. إشارة PID
         control_signal = self._pid_control(error)
         
-        # 5. تعليمات التحكم
-        control_instruction = ""
-        if error > 0.35:
-            control_instruction = "\n[تحكم PID]: حالة توتر عالية جداً. استخدم تمارين تنفس فورية وكن داعماً بقوة."
-        elif error > 0.15:
-            control_instruction = "\n[تحكم PID]: توتر ملحوظ. استخدم أسلوباً لطيفاً واطرح أسئلة مفتوحة للتفريغ."
-        else:
-            control_instruction = "\n[تحكم PID]: الحالة مستقرة. قدم دعماً روتينياً أو استفسر عن الاحتياجات."
+        # 5. بناء خطة الدور وطبقة ما قبل الاستعلام
+        turn_plan = infer_turn_plan(user_input, raw_sentiment)
+        catalog_context = None
+        if turn_plan.intent in {"booking", "education", "support"}:
+            catalog_context = platform_catalog.get_relevant_context(
+                user_input,
+                turn_plan.intent,
+            )
+        system_content = build_pre_query(
+            turn_plan=turn_plan,
+            patient_profile=patient_profile,
+            medical_context=medical_context,
+            conversation_summary=conversation_summary,
+            platform_catalog=catalog_context,
+            smoothed_affect_score=current_sentiment,
+        )
+        user_message = HumanMessage(content=user_input)
+        supplied_history = self._build_history(recent_messages)
+        history = supplied_history if recent_messages is not None else self.messages[-10:]
+        active_prompt = [SystemMessage(content=system_content)] + history + [user_message]
 
-        # 6. بناء السياق
-        dynamic_context = build_dynamic_context(patient_profile, medical_context)
-        self.messages.append(HumanMessage(content=user_input))
-
-        system_content = dynamic_context + control_instruction
-        active_prompt = [SystemMessage(content=system_content)] + self.messages[-10:]
-
-        intent = detect_intent(user_input)
         ai_content = ""
         
         # 7. استدعاء LLM مع إعادة المحاولة
-        max_retries = 2
+        max_retries = 2 if llm else 0
         llm_success = False
         for attempt in range(max_retries):
             try:
@@ -275,17 +333,22 @@ class ConversationController:
                 logger.error(f"LLM call failed (attempt {attempt+1}/{max_retries}): {str(e)}")
                 if attempt == max_retries - 1:
                     logger.warning("Switching to fallback response based on PID state.")
-                    ai_content = self._generate_fallback_response(user_input, current_sentiment, error)
+                    ai_content = self._generate_fallback_response(turn_plan)
                 else:
                     time.sleep(0.8)
 
+        if not llm:
+            ai_content = self._generate_fallback_response(turn_plan)
+
         # 8. التحقق من المخرجات
         if llm_success and not self._verify_output(ai_content):
-            ai_content = "أنا هنا لأسمعك وأدعمك، ولكن يرجى العلم أنني لا أستطيع تقديم تشخيصات طبية. كيف يمكننا التركيز على شعورك الآن؟"
+            logger.warning("LLM output was rejected by the output guard")
+            ai_content = self._generate_fallback_response(turn_plan)
 
         # 9. تخزين الرد في الذاكرة
+        self.messages.append(user_message)
         self.messages.append(AIMessage(content=ai_content))
-        self.messages = [self.messages[0]] + self.messages[-12:]
+        self.messages = self.messages[-12:]
 
         # 10. إرجاع النتيجة
         return {
@@ -294,6 +357,12 @@ class ConversationController:
                 "sentiment_score": round(current_sentiment, 3),
                 "error_level": round(error, 3),
                 "control_signal": round(control_signal, 3),
-                "intent": intent
+                "intent": turn_plan.intent,
+                "response_mode": turn_plan.response_mode,
+                "emotional_intensity": turn_plan.emotional_intensity,
+                "catalog_sources": (
+                    catalog_context.get("sources", []) if catalog_context else []
+                ),
+                "risk_level": "none",
             }
         }

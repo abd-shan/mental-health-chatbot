@@ -1,0 +1,35 @@
+services:
+  aoun-ai:
+    image: aoun-ai-service:1.1.0
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      APP_ENV: production
+      ENABLE_TEST_UI: "false"
+      ENABLE_API_DOCS: "false"
+      CORS_ORIGINS: ""
+      PLATFORM_API_BASE_URL: http://127.0.0.1:3000
+    network_mode: host
+    command:
+      - uvicorn
+      - main:app
+      - --host
+      - 127.0.0.1
+      - --port
+      - "8000"
+      - --workers
+      - "1"
+      - --proxy-headers
+      - --no-server-header
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

@@ -1,0 +1,6 @@
+services:
+  aoun-ai:
+    environment:
+      APP_ENV: development
+      ENABLE_TEST_UI: "true"
+      ENABLE_API_DOCS: "true"

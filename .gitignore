@@ -29,6 +29,7 @@ Thumbs.db
 # Build
 dist/
 build/
+aoun-ai-service-*.tar
 
 # FastAPI
 *.sqlite3
@@ -38,6 +39,8 @@ node_modules/
 
 # uv
 uv.lock
+.uv-cache/
 
 
 
+.conf
